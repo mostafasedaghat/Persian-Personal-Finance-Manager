@@ -382,7 +382,8 @@ class FinanceApp(QMainWindow):
             raise
 
     def init_ui(self):
-        app.setFont(QFont("Vazir", 10))
+        #app.setFont(QFont("Vazir", 10))
+        QApplication.setFont(QFont("Vazir", 10))
         tabs = QTabWidget()
         tabs.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
