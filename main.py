@@ -1653,6 +1653,11 @@ class FinanceApp(QMainWindow):
     
     def confirm_settle_debt(self, debt_id, remaining_amount, account_id, has_payment, is_credit, dialog):
         try:
+            # بررسی اینکه برای طلب، حساب مرتبط انتخاب شده باشه
+            if is_credit and not has_payment:
+                QMessageBox.warning(self, "خطا", "برای تسویه طلب، باید حساب مرتبط برای دریافت پول انتخاب شود!")
+                return
+
             # بررسی موجودی حساب در صورت نیاز
             if has_payment and account_id:
                 self.cursor.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
