@@ -1026,7 +1026,7 @@ class FinanceApp(QMainWindow):
                 QMessageBox.warning(self, "خطا", "این دسته‌بندی در تراکنش‌ها استفاده شده و نمی‌تواند حذف شود!")
                 return
 
-            # تأیید حذف از کاربر
+            # ⚠️ تأیید حذف از کاربر حتی اگر دسته در جایی استفاده نشده باشد
             reply = QMessageBox.question(
                 self, "تأیید حذف", "آیا مطمئن هستید که می‌خواهید این دسته‌بندی را حذف کنید؟",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
