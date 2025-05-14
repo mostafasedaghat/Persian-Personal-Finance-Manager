@@ -1755,8 +1755,8 @@ class FinanceApp(QMainWindow):
         shamsi_end_date = self.loan_end_date.text()
         installments_total = self.loan_installments_total.get_raw_value()
         installments_paid = self.loan_installments_paid.get_raw_value()
-        if not amount or not shamsi_start_date or not shamsi_end_date or not installments_total:
-            QMessageBox.warning(self, "خطا", "فیلدهای ضروری را پر کنید!")
+        if not amount or not shamsi_start_date or not shamsi_end_date or not installments_total or not account_id:
+            QMessageBox.warning(self, "خطا", "فیلدهای ضروری (مبلغ، تاریخ‌ها، تعداد اقساط، حساب) را پر کنید!")
             return
         if not is_valid_shamsi_date(shamsi_start_date) or not is_valid_shamsi_date(shamsi_end_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
@@ -1781,6 +1781,12 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", f"مقادیر عددی یا تاریخ‌ها نامعتبر! {str(e)}")
             return
         try:
+            # بررسی وجود حساب
+            self.cursor.execute("SELECT id FROM accounts WHERE id = ?", (account_id,))
+            if not self.cursor.fetchone():
+                QMessageBox.warning(self, "خطا", "حساب انتخاب‌شده معتبر نیست!")
+                return
+
             self.cursor.execute(
                 "INSERT INTO loans (type, bank_name, total_amount, paid_amount, interest_rate, start_date, end_date, account_id, installments_total, installments_paid) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
