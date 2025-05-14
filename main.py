@@ -803,8 +803,8 @@ class FinanceApp(QMainWindow):
         form_layout.addRow("نوع:", self.category_type)
         form_layout.addRow(add_category_btn)
         self.categories_table = QTableWidget()
-        self.categories_table.setColumnCount(4)
-        self.categories_table.setHorizontalHeaderLabels(["شناسه", "نام", "نوع", "اقدامات"])
+        self.categories_table.setColumnCount(5)
+        self.categories_table.setHorizontalHeaderLabels(["شناسه", "نام", "نوع", "ویرایش", "حذف"])
         self.categories_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         layout.addLayout(form_layout)
         layout.addWidget(self.categories_table)
@@ -890,6 +890,24 @@ class FinanceApp(QMainWindow):
                 edit_btn = QPushButton("ویرایش")
                 edit_btn.clicked.connect(lambda checked, cat_id=id: self.edit_category(cat_id))
                 self.categories_table.setCellWidget(row, 3, edit_btn)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def load_categories_table(self):
+        try:
+            self.cursor.execute("SELECT id, name, type FROM categories")
+            categories = self.cursor.fetchall()
+            self.categories_table.setRowCount(len(categories))
+            for row, (id, name, category_type) in enumerate(categories):
+                self.categories_table.setItem(row, 0, QTableWidgetItem(str(id)))
+                self.categories_table.setItem(row, 1, QTableWidgetItem(name))
+                self.categories_table.setItem(row, 2, QTableWidgetItem("درآمد" if category_type == "income" else "هزینه"))
+                edit_btn = QPushButton("ویرایش")
+                edit_btn.clicked.connect(lambda checked, cat_id=id: self.edit_category(cat_id))
+                self.categories_table.setCellWidget(row, 3, edit_btn)
+                delete_btn = QPushButton("حذف")
+                delete_btn.clicked.connect(lambda checked, cat_id=id: self.delete_category(cat_id))
+                self.categories_table.setCellWidget(row, 4, delete_btn)
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
@@ -1006,6 +1024,31 @@ class FinanceApp(QMainWindow):
             self.load_accounts()
             self.update_dashboard()
             QMessageBox.information(self, "موفق", "تراکنش با موفقیت ثبت شد!")
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def delete_category(self, category_id):
+        try:
+            # بررسی استفاده از دسته‌بندی در تراکنش‌ها
+            self.cursor.execute("SELECT COUNT(*) FROM transactions WHERE category_id = ?", (category_id,))
+            if self.cursor.fetchone()[0] > 0:
+                QMessageBox.warning(self, "خطا", "این دسته‌بندی در تراکنش‌ها استفاده شده و نمی‌تواند حذف شود!")
+                return
+
+            # تأیید حذف از کاربر
+            reply = QMessageBox.question(
+                self, "تأیید حذف", "آیا مطمئن هستید که می‌خواهید این دسته‌بندی را حذف کنید؟",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            self.cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+            self.conn.commit()
+            self.load_categories()
+            self.load_categories_table()
+            self.load_transactions()
+            QMessageBox.information(self, "موفق", "دسته‌بندی با موفقیت حذف شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
