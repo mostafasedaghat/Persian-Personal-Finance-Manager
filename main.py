@@ -531,6 +531,7 @@ class FinanceApp(QMainWindow):
         transaction_form = QFormLayout()
         self.transaction_account = QComboBox()
         self.transaction_person = QComboBox()
+        self.transaction_person.addItem("-", None)
         self.transaction_type = QComboBox()
         self.transaction_type.addItems(["درآمد", "هزینه"])
         self.transaction_category = QComboBox()
@@ -971,11 +972,14 @@ class FinanceApp(QMainWindow):
     def add_transaction(self):
         account_id = self.transaction_account.currentData()
         person_id = self.transaction_person.currentData()
+        if person_id is None or person_id == "":
+            person_id = None  # صریح مشخص کنیم
         category_id = self.transaction_category.currentData()
         amount = self.transaction_amount.get_raw_value()
         shamsi_date = self.transaction_date.text()
         desc = self.transaction_desc.text()
         category_type = "income" if self.transaction_type.currentText() == "درآمد" else "expense"
+
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
             return
