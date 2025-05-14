@@ -1160,41 +1160,42 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
             return
         try:
+            # بررسی موجودی حساب مبدأ
             self.cursor.execute("SELECT balance FROM accounts WHERE id = ?", (from_account_id,))
             balance = self.cursor.fetchone()[0]
             if balance < amount:
                 QMessageBox.warning(self, "خطا", "موجودی حساب مبدأ کافی نیست!")
                 return
 
+            # بررسی وجود هر دو دسته‌بندی
             self.cursor.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (خروج)' AND type = 'expense'")
             expense_result = self.cursor.fetchone()
-            if not expense_result:
-                QMessageBox.critical(self, "خطا", "دسته‌بندی انتقال (خروج) یافت نشد!")
-                return
-            expense_category_id = expense_result[0]
-
             self.cursor.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (ورود)' AND type = 'income'")
             income_result = self.cursor.fetchone()
-            if not income_result:
-                QMessageBox.critical(self, "خطا", "دسته‌بندی انتقال (ورود) یافت نشد!")
+            if not expense_result or not income_result:
+                QMessageBox.critical(self, "خطا", "دسته‌بندی‌های انتقال (ورود یا خروج) یافت نشدند!")
                 return
+            expense_category_id = expense_result[0]
             income_category_id = income_result[0]
 
-            self.cursor.execute(
-                "INSERT INTO transactions (account_id, person_id, category_id, amount, date, description) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (from_account_id, None, expense_category_id, amount, date, f"انتقال به حساب {self.transfer_to_account.currentText().split(' (')[0]}")
-            )
-            self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, from_account_id))
+            # انجام تمام عملیات در یک تراکنش
+            with self.conn:
+                # ثبت تراکنش خروج
+                self.cursor.execute(
+                    "INSERT INTO transactions (account_id, category_id, amount, date, description) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (from_account_id, expense_category_id, amount, date, "انتقال به حساب دیگر")
+                )
+                # ثبت تراکنش ورود
+                self.cursor.execute(
+                    "INSERT INTO transactions (account_id, category_id, amount, date, description) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (to_account_id, income_category_id, amount, date, "دریافت از حساب دیگر")
+                )
+                # به‌روزرسانی موجودی حساب‌ها
+                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, from_account_id))
+                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, to_account_id))
 
-            self.cursor.execute(
-                "INSERT INTO transactions (account_id, person_id, category_id, amount, date, description) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (to_account_id, None, income_category_id, amount, date, f"دریافت از حساب {self.transfer_from_account.currentText().split(' (')[0]}")
-            )
-            self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, to_account_id))
-
-            self.conn.commit()
             self.transfer_amount.clear()
             self.transfer_date.clear()
             self.load_transactions()
