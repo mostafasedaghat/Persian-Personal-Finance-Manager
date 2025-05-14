@@ -444,6 +444,11 @@ class FinanceApp(QMainWindow):
         self.important_debts_table.setHorizontalHeaderLabels(["شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت"])
         self.important_debts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.important_debts_table.verticalHeader().setDefaultSectionSize(40)
+        self.important_debts_table.setColumnWidth(0, 150)  # شخص
+        self.important_debts_table.setColumnWidth(1, 100)  # مبلغ
+        self.important_debts_table.setColumnWidth(2, 100)  # پرداخت شده
+        self.important_debts_table.setColumnWidth(3, 100)  # سررسید
+        self.important_debts_table.setColumnWidth(4, 80)   # وضعیت
         scroll_area_debts.setWidget(self.important_debts_table)
         scroll_area_debts.setWidgetResizable(True)
         scroll_area_debts.setMinimumHeight(200)
@@ -916,13 +921,13 @@ class FinanceApp(QMainWindow):
         if not name:
             QMessageBox.warning(self, "خطا", "نام دسته‌بندی نمی‌تواند خالی باشد!")
             return
-        category_type = "income" if category_type == "درآمد" else "expense"
+        category_type = "income" if type_text == "درآمد" else "expense"
         try:
             self.cursor.execute("UPDATE categories SET name = ?, type = ? WHERE id = ?", (name, category_type, category_id))
             self.conn.commit()
-            self.load_categories()  # به‌روزرسانی لیست دسته‌بندی‌ها برای بخش تراکنش
-            self.load_categories_table()  # به‌روزرسانی جدول دسته‌بندی‌ها
-            self.load_transactions()  # به‌روزرسانی جدول تراکنش‌ها
+            self.load_categories()
+            self.load_categories_table()
+            self.load_transactions()
             dialog.accept()
             QMessageBox.information(self, "موفق", "دسته‌بندی با موفقیت ویرایش شد!")
         except sqlite3.Error as e:
@@ -958,15 +963,17 @@ class FinanceApp(QMainWindow):
 
     def add_transaction(self):
         account_id = self.transaction_account.currentData()
-        person_id = self.transaction_person.currentData()  # می‌تونه None باشه
+        person_id = self.transaction_person.currentData()
         category_id = self.transaction_category.currentData()
         amount = self.transaction_amount.get_raw_value()
         shamsi_date = self.transaction_date.text()
         desc = self.transaction_desc.text()
         category_type = "income" if self.transaction_type.currentText() == "درآمد" else "expense"
-        if not amount or not shamsi_date:
-            QMessageBox.warning(self, "خطا", "مبلغ و تاریخ نمی‌توانند خالی باشند!")
+        if not amount:
+            QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
             return
+        if not shamsi_date:
+            shamsi_date = gregorian_to_shamsi(datetime.now().date().strftime("%Y-%m-%d"))
         if not is_valid_shamsi_date(shamsi_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
@@ -1036,28 +1043,38 @@ class FinanceApp(QMainWindow):
                 edit_person.setCurrentText([name for p_id, name in persons if p_id == person_id][0])
 
             edit_type = QComboBox()
-            edit_type.setObjectName("edit_type")
             edit_type.addItems(["درآمد", "هزینه"])
             edit_type.setCurrentText("درآمد" if category_type == "income" else "هزینه")
 
             edit_category = QComboBox()
-            self.cursor.execute("SELECT id, name FROM categories WHERE type = ?", (category_type,))
-            categories = self.cursor.fetchall()
-            for cat_id, name in categories:
-                edit_category.addItem(name, cat_id)
-            edit_category.setCurrentText([name for cat_id, name in categories if cat_id == category_id][0])
+            def update_categories():
+                edit_category.clear()
+                current_type = "income" if edit_type.currentText() == "درآمد" else "expense"
+                self.cursor.execute("SELECT id, name FROM categories WHERE type = ?", (current_type,))
+                categories = self.cursor.fetchall()
+                for cat_id, name in categories:
+                    edit_category.addItem(name, cat_id)
+                if category_id:
+                    for index in range(edit_category.count()):
+                        if edit_category.itemData(index) == category_id:
+                            edit_category.setCurrentIndex(index)
+                            break
+            update_categories()
+            edit_type.currentTextChanged.connect(update_categories)
 
-            edit_amount = QLineEdit(str(amount))
+            edit_amount = NumberInput()
+            edit_amount.setText(str(amount))
             edit_date = QLineEdit(gregorian_to_shamsi(date))
             edit_date.setReadOnly(True)
-            edit_calendar = PersianCalendarWidget(edit_date)
+            edit_date.setPlaceholderText("1404/02/13")
+            edit_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_date)
             edit_desc = QLineEdit(desc)
 
             save_btn = QPushButton("ذخیره")
             save_btn.clicked.connect(lambda: self.save_transaction(
                 transaction_id, edit_account.currentData(), edit_person.currentData(),
-                edit_category.currentData(), edit_amount.text(), edit_date.text(),
-                edit_desc.text(), dialog, account_id, amount, category_type
+                edit_category.currentData(), edit_amount.get_raw_value(), edit_date.text(),
+                edit_desc.text(), edit_type.currentText(), dialog, account_id, amount, category_type
             ))
 
             layout.addRow("حساب:", edit_account)
@@ -1066,7 +1083,6 @@ class FinanceApp(QMainWindow):
             layout.addRow("دسته‌بندی:", edit_category)
             layout.addRow("مبلغ:", edit_amount)
             layout.addRow("تاریخ (شمسی):", edit_date)
-            layout.addRow(edit_calendar)
             layout.addRow("توضیحات:", edit_desc)
             layout.addRow(save_btn)
 
@@ -1075,7 +1091,7 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def save_transaction(self, transaction_id, account_id, person_id, category_id, amount, shamsi_date, desc, dialog, old_account_id, old_amount, old_category_type):
+    def save_transaction(self, transaction_id, account_id, person_id, category_id, amount, shamsi_date, desc, type_text, dialog, old_account_id, old_amount, old_category_type):
         if not amount or not shamsi_date:
             QMessageBox.warning(self, "خطا", "مبلغ و تاریخ نمی‌توانند خالی باشند!")
             return
@@ -1093,29 +1109,25 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
             return
         try:
-            # دریافت نوع جدید تراکنش از رابط کاربری
-            new_category_type = "income" if dialog.findChild(QComboBox, "edit_type").currentText() == "درآمد" else "expense"
+            # دریافت نوع جدید تراکنش
+            new_category_type = "income" if type_text == "درآمد" else "expense"
 
             # ۱. معکوس کردن اثر تراکنش قدیمی
             if old_category_type == "income":
-                # اگر تراکنش قدیمی درآمد بوده، مبلغ رو از حساب قدیمی کم می‌کنیم (معکوس کردن)
                 self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
             else:
-                # اگر تراکنش قدیمی هزینه بوده، مبلغ رو به حساب قدیمی برمی‌گردونیم
                 self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_amount, old_account_id))
 
             # ۲. اعمال اثر تراکنش جدید
             if new_category_type == "income":
-                # اگر تراکنش جدید درآمد هست، مبلغ رو به حساب جدید اضافه می‌کنیم
                 self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
             else:
-                # اگر تراکنش جدید هزینه هست، مبلغ رو از حساب جدید کم می‌کنیم
                 self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
 
             # ۳. به‌روزرسانی تراکنش در دیتابیس
             self.cursor.execute(
-                "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, amount = ?, date = ?, description = ? WHERE id = ?",
-                (account_id, person_id, category_id, amount, date, desc, transaction_id)
+                "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, amount = ?, date = ?, description = ?, type = ? WHERE id = ?",
+                (account_id, person_id, category_id, amount, date, desc, new_category_type, transaction_id)
             )
             self.conn.commit()
             self.load_transactions()
@@ -1487,8 +1499,33 @@ class FinanceApp(QMainWindow):
                 QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
                 return
         try:
-            # تعیین account_id بر اساس وضعیت has_payment و is_credit
+            # دریافت اطلاعات بدهی قدیمی برای معکوس کردن اثر
+            self.cursor.execute("SELECT amount, account_id FROM debts WHERE id = ?", (debt_id,))
+            old_debt = self.cursor.fetchone()
+            if not old_debt:
+                QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
+                return
+            old_amount, old_account_id = old_debt
+
+            # تعیین account_id جدید
             account_id_to_save = account_id if has_payment and not is_credit else None
+
+            # بررسی موجودی حساب در صورت نیاز
+            if has_payment and not is_credit and account_id:
+                self.cursor.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
+                balance = self.cursor.fetchone()[0]
+                if balance < amount:
+                    QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
+                    return
+
+            # معکوس کردن اثر بدهی قدیمی (اگر account_id وجود داشت)
+            if old_account_id:
+                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
+
+            # اعمال اثر بدهی جدید
+            if has_payment and not is_credit and account_id:
+                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+
             # به‌روزرسانی بدهی/طلب
             self.cursor.execute(
                 "UPDATE debts SET person_id = ?, amount = ?, account_id = ?, due_date = ?, is_paid = 0, show_in_dashboard = ? WHERE id = ?",
@@ -1930,11 +1967,13 @@ class FinanceApp(QMainWindow):
             self.loans_current_page += 1
             self.load_loans()
 
-    def edit_loan_installments(self, installment_id):
-        loan_id = int(self.loans_table.item(item.row(), 0).text())
+    def edit_loan_installments(self, loan_id):
         try:
             self.cursor.execute("SELECT total_amount, installments_total, installments_paid, start_date FROM loans WHERE id = ?", (loan_id,))
             loan = self.cursor.fetchone()
+            if not loan:
+                QMessageBox.warning(self, "خطا", "وام یافت نشد!")
+                return
             total_amount, installments_total, installments_paid, start_date = loan
             if installments_total == 0:
                 QMessageBox.warning(self, "خطا", "تعداد اقساط نمی‌تواند صفر باشد!")
@@ -1955,7 +1994,7 @@ class FinanceApp(QMainWindow):
                     due_date = start_date + jdatetime.timedelta(days=i * 30)
                     due_date_str = due_date.togregorian().strftime("%Y-%m-%d")
                     self.cursor.execute("INSERT INTO loan_installments (loan_id, amount, due_date, is_paid) VALUES (?, ?, ?, ?)", 
-                                      (loan_id, installment_amount, due_date_str, 1 if i < installments_paid else 0))
+                                    (loan_id, installment_amount, due_date_str, 1 if i < installments_paid else 0))
                     self.conn.commit()
                 self.cursor.execute("SELECT id, amount, due_date, is_paid FROM loan_installments WHERE loan_id = ?", (loan_id,))
                 installments = self.cursor.fetchall()
@@ -1965,9 +2004,12 @@ class FinanceApp(QMainWindow):
                 installments_table.setItem(row, 1, QTableWidgetItem(format_number(amount)))
                 installments_table.setItem(row, 2, QTableWidgetItem(gregorian_to_shamsi(due_date)))
                 installments_table.setItem(row, 3, QTableWidgetItem("بله" if is_paid else "خیر"))
-                btn_pay = QPushButton("پرداخت")
-                btn_pay.clicked.connect(lambda checked, r=row: self.pay_installment(loan_id, r))
-                installments_table.setCellWidget(row, 4, btn_pay)
+                if not is_paid:
+                    btn_pay = QPushButton("پرداخت")
+                    btn_pay.clicked.connect(lambda checked, r=row: self.pay_installment(loan_id, r))
+                    installments_table.setCellWidget(row, 4, btn_pay)
+                else:
+                    installments_table.setItem(row, 4, QTableWidgetItem("-"))
             layout.addWidget(installments_table)
             dialog.setLayout(layout)
             dialog.exec()
@@ -2095,12 +2137,6 @@ class FinanceApp(QMainWindow):
             debts = self.cursor.fetchall()
 
             self.important_debts_table.setRowCount(len(debts))
-            self.important_debts_table.setColumnWidth(0, 120)
-            self.important_debts_table.setColumnWidth(1, 100)
-            self.important_debts_table.setColumnWidth(2, 100)
-            self.important_debts_table.setColumnWidth(3, 100)
-            self.important_debts_table.setColumnWidth(4, 80)
-
             for row, (id, person, amount, paid, due_date, is_paid, account) in enumerate(debts):
                 shamsi_due_date = gregorian_to_shamsi(due_date) if due_date else "-"
                 self.important_debts_table.setItem(row, 0, QTableWidgetItem(person))
