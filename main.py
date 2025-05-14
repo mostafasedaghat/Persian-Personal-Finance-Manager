@@ -33,10 +33,11 @@ def gregorian_to_shamsi(date):
 def shamsi_to_gregorian(date_str):
     try:
         j_year, j_month, j_day = map(int, date_str.replace('/', '-').split('-'))
+        jdatetime.date(j_year, j_month, j_day)  # بررسی اعتبار تاریخ شمسی
         g_date = jdatetime.date(j_year, j_month, j_day).togregorian()
         return f"{g_date.year}-{g_date.month:02d}-{g_date.day:02d}"
     except Exception:
-        return date_str
+        return None  # یا یک مقدار پیش‌فرض
 
 def is_valid_shamsi_date(date_str):
     return bool(re.match(r"^\d{4}/\d{2}/\d{2}$", date_str))
@@ -210,7 +211,10 @@ class NumberInput(QLineEdit):
             self.setCursorPosition(len(formatted))  # مکان‌نما رو آخر متن می‌بره
 
     def get_raw_value(self):
-        return int(self.text().replace(",", ""))        
+        text = self.text().replace(",", "")
+        if text.isdigit():
+            return int(text)
+        return 0  # یا مقدار پیش‌فرض دیگر
 
 class FinanceApp(QMainWindow):
     def __init__(self):
@@ -968,6 +972,9 @@ class FinanceApp(QMainWindow):
             return
         try:
             date = shamsi_to_gregorian(shamsi_date)
+            if not date:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
             QDate.fromString(date, "yyyy-MM-dd")
         except ValueError:
             QMessageBox.warning(self, "خطا", "تاریخ نامعتبر است!")
@@ -1078,6 +1085,9 @@ class FinanceApp(QMainWindow):
         try:
             amount = float(amount)
             date = shamsi_to_gregorian(shamsi_date)
+            if not date:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
             QDate.fromString(date, "yyyy-MM-dd")
         except ValueError:
             QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
@@ -1132,6 +1142,9 @@ class FinanceApp(QMainWindow):
             return
         try:
             date = shamsi_to_gregorian(shamsi_date)
+            if not date:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
             QDate.fromString(date, "yyyy-MM-dd")
         except ValueError:
             QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
@@ -1144,9 +1157,18 @@ class FinanceApp(QMainWindow):
                 return
 
             self.cursor.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (خروج)' AND type = 'expense'")
-            expense_category_id = self.cursor.fetchone()[0]
+            expense_result = self.cursor.fetchone()
+            if not expense_result:
+                QMessageBox.critical(self, "خطا", "دسته‌بندی انتقال (خروج) یافت نشد!")
+                return
+            expense_category_id = expense_result[0]
+
             self.cursor.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (ورود)' AND type = 'income'")
-            income_category_id = self.cursor.fetchone()[0]
+            income_result = self.cursor.fetchone()
+            if not income_result:
+                QMessageBox.critical(self, "خطا", "دسته‌بندی انتقال (ورود) یافت نشد!")
+                return
+            income_category_id = income_result[0]
 
             self.cursor.execute(
                 "INSERT INTO transactions (account_id, person_id, category_id, amount, date, description) "
@@ -1343,6 +1365,9 @@ class FinanceApp(QMainWindow):
                 return
             try:
                 due_date = shamsi_to_gregorian(shamsi_due_date)
+                if not due_date:
+                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                    return
                 QDate.fromString(due_date, "yyyy-MM-dd")
             except ValueError:
                 QMessageBox.warning(self, "خطا", "تاریخ نامعتبر است!")
@@ -1443,7 +1468,7 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def save_debt(self, debt_id, person_id, amount, account_id, shamsi_due_date, is_credit, dialog):
+    def save_debt(self, debt_id, person_id, amount, account_id, shamsi_due_date, is_credit, has_payment, show_in_dashboard, dialog):
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
             return
@@ -1454,15 +1479,20 @@ class FinanceApp(QMainWindow):
                 return
             try:
                 due_date = shamsi_to_gregorian(shamsi_due_date)
+                if not due_date:
+                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                    return
                 QDate.fromString(due_date, "yyyy-MM-dd")
             except ValueError:
                 QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
                 return
         try:
+            # تعیین account_id بر اساس وضعیت has_payment و is_credit
+            account_id_to_save = account_id if has_payment and not is_credit else None
             # به‌روزرسانی بدهی/طلب
             self.cursor.execute(
                 "UPDATE debts SET person_id = ?, amount = ?, account_id = ?, due_date = ?, is_paid = 0, show_in_dashboard = ? WHERE id = ?",
-                (person_id, amount, account_id if has_payment and not is_credit else None, due_date, 1 if show_in_dashboard else 0, debt_id)
+                (person_id, amount, account_id_to_save, due_date, 1 if show_in_dashboard else 0, debt_id)
             )
             self.conn.commit()
             self.load_debts()
@@ -1689,7 +1719,13 @@ class FinanceApp(QMainWindow):
         try:
             interest = float(interest) if interest else 0.0  # نرخ سود اختیاری
             start_date = shamsi_to_gregorian(shamsi_start_date)
+            if not start_date:
+                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                    return
             end_date = shamsi_to_gregorian(shamsi_end_date)
+            if not end_date:
+                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                    return
             installments_total = int(installments_total)
             installments_paid = int(installments_paid) if installments_paid else 0
             if installments_paid > installments_total:
@@ -1804,7 +1840,13 @@ class FinanceApp(QMainWindow):
             amount = float(amount)
             interest = float(interest) if interest else 0.0
             start_date = shamsi_to_gregorian(shamsi_start_date)
+            if not start_date:
+                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                    return
             end_date = shamsi_to_gregorian(shamsi_end_date)
+            if not end_date:
+                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                    return
             installments_total = int(installments_total)
             installments_paid = int(installments_paid) if installments_paid else 0
             if installments_paid > installments_total:
@@ -1894,6 +1936,9 @@ class FinanceApp(QMainWindow):
             self.cursor.execute("SELECT total_amount, installments_total, installments_paid, start_date FROM loans WHERE id = ?", (loan_id,))
             loan = self.cursor.fetchone()
             total_amount, installments_total, installments_paid, start_date = loan
+            if installments_total == 0:
+                QMessageBox.warning(self, "خطا", "تعداد اقساط نمی‌تواند صفر باشد!")
+                return
             installment_amount = total_amount / installments_total
             dialog = QDialog(self)
             dialog.setWindowTitle("ویرایش اقساط")
@@ -2090,7 +2135,13 @@ class FinanceApp(QMainWindow):
             return
         try:
             start_date_g = shamsi_to_gregorian(start_date)
+            if not start_date_g:
+                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                    return
             end_date_g = shamsi_to_gregorian(end_date)
+            if not end_date_g:
+                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                    return
             QDate.fromString(start_date_g, "yyyy-MM-dd")
             QDate.fromString(end_date_g, "yyyy-MM-dd")
         except ValueError:
