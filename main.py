@@ -1145,26 +1145,26 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
             return
         try:
-            # دریافت نوع جدید تراکنش
             new_category_type = "income" if type_text == "درآمد" else "expense"
 
-            # ۱. معکوس کردن اثر تراکنش قدیمی
+            # خنثی کردن اثر تراکنش قدیمی
             if old_category_type == "income":
                 self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
             else:
                 self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_amount, old_account_id))
 
-            # ۲. اعمال اثر تراکنش جدید
+            # اعمال اثر تراکنش جدید
             if new_category_type == "income":
                 self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
             else:
                 self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
 
-            # ۳. به‌روزرسانی تراکنش در دیتابیس (حذف ستون type)
+            # بروزرسانی در دیتابیس
             self.cursor.execute(
                 "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, amount = ?, date = ?, description = ? WHERE id = ?",
                 (account_id, person_id, category_id, amount, date, desc, transaction_id)
             )
+
             self.conn.commit()
             self.load_transactions()
             self.load_accounts()
