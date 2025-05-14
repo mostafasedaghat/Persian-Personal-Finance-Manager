@@ -879,22 +879,6 @@ class FinanceApp(QMainWindow):
         self.update_categories()  # به جای کد قبلی، از متد جدید استفاده می‌کنیم
 
     def load_categories_table(self):
-        """به‌روزرسانی جدول دسته‌بندی‌ها در تب دسته‌بندی‌ها"""
-        try:
-            self.cursor.execute("SELECT id, name, type FROM categories")
-            categories = self.cursor.fetchall()
-            self.categories_table.setRowCount(len(categories))
-            for row, (id, name, category_type) in enumerate(categories):
-                self.categories_table.setItem(row, 0, QTableWidgetItem(str(id)))
-                self.categories_table.setItem(row, 1, QTableWidgetItem(name))
-                self.categories_table.setItem(row, 2, QTableWidgetItem("درآمد" if category_type == "income" else "هزینه"))
-                edit_btn = QPushButton("ویرایش")
-                edit_btn.clicked.connect(lambda checked, cat_id=id: self.edit_category(cat_id))
-                self.categories_table.setCellWidget(row, 3, edit_btn)
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def load_categories_table(self):
         try:
             self.cursor.execute("SELECT id, name, type FROM categories")
             categories = self.cursor.fetchall()
