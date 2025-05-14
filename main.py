@@ -681,7 +681,7 @@ class FinanceApp(QMainWindow):
         self.loan_type.addItems(["وام گرفته‌شده", "وام داده‌شده"])
         self.loan_bank = QLineEdit()
         self.loan_amount = NumberInput()
-        self.loan_interest = QLineEdit()
+        self.loan_interest = NumberInput()
         self.loan_account = QComboBox()
         self.loan_start_date = QLineEdit()
         # تنظیم تاریخ پیش‌فرض به امروز
@@ -689,15 +689,13 @@ class FinanceApp(QMainWindow):
         self.loan_start_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.loan_start_date.setPlaceholderText("1404/02/13")
         self.loan_start_date.setReadOnly(True)
-        # حذف PersianCalendarWidget از لِی‌اوت و استفاده از پاپ‌آپ
         self.loan_start_date.mousePressEvent = lambda event: self.show_calendar_popup(self.loan_start_date)
-        self.loan_installments_total = QLineEdit()
-        self.loan_installments_paid = QLineEdit()
+        self.loan_installments_total = NumberInput()
+        self.loan_installments_paid = NumberInput()
         self.loan_end_date = QLineEdit()
-        self.loan_end_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))  # یا تاریخ آینده
+        self.loan_end_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.loan_end_date.setPlaceholderText("1405/02/13")
         self.loan_end_date.setReadOnly(True)
-        # حذف PersianCalendarWidget از لِی‌اوت و استفاده از پاپ‌آپ
         self.loan_end_date.mousePressEvent = lambda event: self.show_calendar_popup(self.loan_end_date)
         add_loan_btn = QPushButton("ثبت وام")
         add_loan_btn.clicked.connect(self.add_loan)
@@ -1124,10 +1122,10 @@ class FinanceApp(QMainWindow):
             else:
                 self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
 
-            # ۳. به‌روزرسانی تراکنش در دیتابیس
+            # ۳. به‌روزرسانی تراکنش در دیتابیس (حذف ستون type)
             self.cursor.execute(
-                "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, amount = ?, date = ?, description = ?, type = ? WHERE id = ?",
-                (account_id, person_id, category_id, amount, date, desc, new_category_type, transaction_id)
+                "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, amount = ?, date = ?, description = ? WHERE id = ?",
+                (account_id, person_id, category_id, amount, date, desc, transaction_id)
             )
             self.conn.commit()
             self.load_transactions()
@@ -1741,12 +1739,12 @@ class FinanceApp(QMainWindow):
         loan_type = "taken" if self.loan_type.currentText() == "وام گرفته‌شده" else "given"
         bank_name = self.loan_bank.text()
         amount = self.loan_amount.get_raw_value()
-        interest = self.loan_interest.text()
+        interest = self.loan_interest.get_raw_value()
         account_id = self.loan_account.currentData()
         shamsi_start_date = self.loan_start_date.text()
         shamsi_end_date = self.loan_end_date.text()
-        installments_total = self.loan_installments_total.text()
-        installments_paid = self.loan_installments_paid.text()
+        installments_total = self.loan_installments_total.get_raw_value()
+        installments_paid = self.loan_installments_paid.get_raw_value()
         if not amount or not shamsi_start_date or not shamsi_end_date or not installments_total:
             QMessageBox.warning(self, "خطا", "فیلدهای ضروری را پر کنید!")
             return
@@ -1754,15 +1752,15 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         try:
-            interest = float(interest) if interest else 0.0  # نرخ سود اختیاری
+            interest = float(interest) if interest else 0.0
             start_date = shamsi_to_gregorian(shamsi_start_date)
             if not start_date:
-                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                    return
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
             end_date = shamsi_to_gregorian(shamsi_end_date)
             if not end_date:
-                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                    return
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
             installments_total = int(installments_total)
             installments_paid = int(installments_paid) if installments_paid else 0
             if installments_paid > installments_total:
@@ -1817,8 +1815,10 @@ class FinanceApp(QMainWindow):
             edit_loan_type.setCurrentText("وام گرفته‌شده" if loan_type == "taken" else "وام داده‌شده")
 
             edit_bank = QLineEdit(bank_name)
-            edit_amount = QLineEdit(str(total_amount))
-            edit_interest = QLineEdit(str(interest_rate))
+            edit_amount = NumberInput()
+            edit_amount.setText(str(total_amount))
+            edit_interest = NumberInput()
+            edit_interest.setText(str(interest_rate))
 
             edit_account = QComboBox()
             self.cursor.execute("SELECT id, name, balance FROM accounts")
@@ -1830,21 +1830,25 @@ class FinanceApp(QMainWindow):
 
             edit_start_date = QLineEdit(gregorian_to_shamsi(start_date))
             edit_start_date.setReadOnly(True)
-            edit_start_calendar = PersianCalendarWidget(edit_start_date)
+            edit_start_date.setPlaceholderText("1404/02/13")
+            edit_start_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_start_date)
 
-            edit_installments_total = QLineEdit(str(installments_total))
-            edit_installments_paid = QLineEdit(str(installments_paid))
+            edit_installments_total = NumberInput()
+            edit_installments_total.setText(str(installments_total))
+            edit_installments_paid = NumberInput()
+            edit_installments_paid.setText(str(installments_paid))
 
             edit_end_date = QLineEdit(gregorian_to_shamsi(end_date))
             edit_end_date.setReadOnly(True)
-            edit_end_calendar = PersianCalendarWidget(edit_end_date)
+            edit_end_date.setPlaceholderText("1405/02/13")
+            edit_end_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_end_date)
 
             save_btn = QPushButton("ذخیره")
             save_btn.clicked.connect(lambda: self.save_loan(
                 loan_id, edit_loan_type.currentText(), edit_bank.text(),
-                edit_amount.text(), edit_interest.text(), edit_account.currentData(),
+                edit_amount.get_raw_value(), edit_interest.get_raw_value(), edit_account.currentData(),
                 edit_start_date.text(), edit_end_date.text(),
-                edit_installments_total.text(), edit_installments_paid.text(), dialog
+                edit_installments_total.get_raw_value(), edit_installments_paid.get_raw_value(), dialog
             ))
 
             layout.addRow("نوع وام:", edit_loan_type)
@@ -1853,11 +1857,9 @@ class FinanceApp(QMainWindow):
             layout.addRow("نرخ سود (%):", edit_interest)
             layout.addRow("حساب مرتبط:", edit_account)
             layout.addRow("تاریخ شروع (شمسی):", edit_start_date)
-            layout.addRow(edit_start_calendar)
             layout.addRow("تعداد اقساط کل:", edit_installments_total)
             layout.addRow("تعداد اقساط پرداخت‌شده:", edit_installments_paid)
             layout.addRow("تاریخ پایان (شمسی):", edit_end_date)
-            layout.addRow(edit_end_calendar)
             layout.addRow(save_btn)
 
             dialog.exec()
@@ -1878,12 +1880,12 @@ class FinanceApp(QMainWindow):
             interest = float(interest) if interest else 0.0
             start_date = shamsi_to_gregorian(shamsi_start_date)
             if not start_date:
-                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                    return
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
             end_date = shamsi_to_gregorian(shamsi_end_date)
             if not end_date:
-                    QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                    return
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
             installments_total = int(installments_total)
             installments_paid = int(installments_paid) if installments_paid else 0
             if installments_paid > installments_total:
