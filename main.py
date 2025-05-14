@@ -18,10 +18,12 @@ locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 # توابع تبدیل تاریخ
 def gregorian_to_shamsi(date):
     try:
+        if not date:
+            return ""
         if isinstance(date, QDate):
             date_str = date.toString("yyyy-MM-dd")
         else:
-            date_str = date
+            date_str = str(date)
         g_date = QDate.fromString(date_str, "yyyy-MM-dd")
         if not g_date.isValid():
             return date_str
@@ -32,15 +34,15 @@ def gregorian_to_shamsi(date):
 
 def shamsi_to_gregorian(date_str):
     try:
-         # بررسی فرمت تاریخ
+        if not date_str or not isinstance(date_str, str):
+            return None
         if not re.match(r"^\d{4}/\d{2}/\d{2}$", date_str):
             return None
         j_year, j_month, j_day = map(int, date_str.replace('/', '-').split('-'))
-        # بررسی اعتبار تاریخ شمسی
-        jdatetime.date(j_year, j_month, j_day)
+        jdatetime.date(j_year, j_month, j_day)  # اعتبارسنجی
         g_date = jdatetime.date(j_year, j_month, j_day).togregorian()
         return f"{g_date.year}-{g_date.month:02d}-{g_date.day:02d}"
-    except ValueError:
+    except (ValueError, TypeError):
         return None
 
 def is_valid_shamsi_date(date_str):
