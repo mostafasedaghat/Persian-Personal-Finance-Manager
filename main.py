@@ -32,12 +32,16 @@ def gregorian_to_shamsi(date):
 
 def shamsi_to_gregorian(date_str):
     try:
+         # بررسی فرمت تاریخ
+        if not re.match(r"^\d{4}/\d{2}/\d{2}$", date_str):
+            return None
         j_year, j_month, j_day = map(int, date_str.replace('/', '-').split('-'))
-        jdatetime.date(j_year, j_month, j_day)  # بررسی اعتبار تاریخ شمسی
+        # بررسی اعتبار تاریخ شمسی
+        jdatetime.date(j_year, j_month, j_day)
         g_date = jdatetime.date(j_year, j_month, j_day).togregorian()
         return f"{g_date.year}-{g_date.month:02d}-{g_date.day:02d}"
-    except Exception:
-        return None  # یا یک مقدار پیش‌فرض
+    except ValueError:
+        return None
 
 def is_valid_shamsi_date(date_str):
     return bool(re.match(r"^\d{4}/\d{2}/\d{2}$", date_str))
