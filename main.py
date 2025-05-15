@@ -1,3 +1,4 @@
+from database import DatabaseManager
 import sys
 import locale
 import re
@@ -236,6 +237,9 @@ class FinanceApp(QMainWindow):
         self.setGeometry(100, 100, 1200, 900)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
+        # ایجاد نمونه از DatabaseManager
+        self.db_manager = DatabaseManager('finance.db')
+
         # بارگذاری استایل‌ها
         with open('styles.qss', 'r', encoding='utf-8') as f:
             self.setStyleSheet(f.read())
@@ -250,10 +254,8 @@ class FinanceApp(QMainWindow):
 
     def init_db(self):
         try:
-            self.conn = sqlite3.connect('finance.db')
-            self.cursor = self.conn.cursor()
             
-            self.cursor.executescript("""
+            self.db_manager.executescript("""
                 CREATE TABLE IF NOT EXISTS accounts (
                     id INTEGER PRIMARY KEY,
                     name TEXT,
@@ -315,19 +317,19 @@ class FinanceApp(QMainWindow):
                     name TEXT UNIQUE
                 );
             """)
-            self.conn.commit()
+            self.db_manager.commit()
 
             # اضافه کردن ستون show_in_dashboard اگر وجود نداشته باشه
-            self.cursor.execute("PRAGMA table_info(debts)")
-            columns = [col[1] for col in self.cursor.fetchall()]
+            self.db_manager.execute("PRAGMA table_info(debts)")
+            columns = [col[1] for col in self.db_manager.fetchall()]
             if "show_in_dashboard" not in columns:
-                self.cursor.execute("ALTER TABLE debts ADD COLUMN show_in_dashboard INTEGER DEFAULT 0")
-                self.conn.commit()
+                self.db_manager.execute("ALTER TABLE debts ADD COLUMN show_in_dashboard INTEGER DEFAULT 0")
+                self.db_manager.commit()
 
             # بررسی وجود دسته‌بندی‌ها قبل از درج
-            self.cursor.execute("SELECT COUNT(*) FROM categories")
-            if self.cursor.fetchone()[0] == 0:
-                self.cursor.executescript("""
+            self.db_manager.execute("SELECT COUNT(*) FROM categories")
+            if self.db_manager.fetchone()[0] == 0:
+                self.db_manager.executescript("""
                     INSERT OR IGNORE INTO categories (name, type) VALUES
                     ('حقوق', 'income'), ('فروش', 'income'), ('سایر درآمدها', 'income'),
                     ('خوراک', 'expense'), ('حمل‌ونقل', 'expense'), ('مسکن', 'expense'),
@@ -335,7 +337,7 @@ class FinanceApp(QMainWindow):
                     ('سایر هزینه‌ها', 'expense'),
                     ('انتقال بین حساب‌ها (خروج)', 'expense'), ('انتقال بین حساب‌ها (ورود)', 'income');
                 """)
-                self.conn.commit()
+                self.db_manager.commit()
 
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
@@ -786,8 +788,8 @@ class FinanceApp(QMainWindow):
 
     def load_accounts(self):
         try:
-            self.cursor.execute("SELECT id, name, balance FROM accounts")
-            accounts = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name, balance FROM accounts")
+            accounts = self.db_manager.fetchall()
             self.accounts_table.setRowCount(len(accounts))
             self.transaction_account.clear()
             self.debt_account.clear()
@@ -814,8 +816,8 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "نام حساب نمی‌تواند خالی باشد!")
             return
         try:
-            self.cursor.execute("INSERT INTO accounts (name, balance) VALUES (?, ?)", (name, balance))
-            self.conn.commit()
+            self.db_manager.execute("INSERT INTO accounts (name, balance) VALUES (?, ?)", (name, balance))
+            self.db_manager.commit()
             self.account_name_input.clear()
             self.account_balance_input.clear()
             self.load_accounts()
@@ -828,8 +830,8 @@ class FinanceApp(QMainWindow):
         category_type = "income" if self.transaction_type.currentText() == "درآمد" else "expense"
         self.transaction_category.clear()
         try:
-            self.cursor.execute("SELECT id, name FROM categories WHERE type = ?", (category_type,))
-            categories = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name FROM categories WHERE type = ?", (category_type,))
+            categories = self.db_manager.fetchall()
             for cat_id, name in categories:
                 self.transaction_category.addItem(name, cat_id)
         except sqlite3.Error as e:
@@ -841,8 +843,8 @@ class FinanceApp(QMainWindow):
 
     def load_categories_table(self):
         try:
-            self.cursor.execute("SELECT id, name, type FROM categories")
-            categories = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name, type FROM categories")
+            categories = self.db_manager.fetchall()
             self.categories_table.setRowCount(len(categories))
             for row, (id, name, category_type) in enumerate(categories):
                 self.categories_table.setItem(row, 0, QTableWidgetItem(str(id)))
@@ -859,8 +861,8 @@ class FinanceApp(QMainWindow):
 
     def edit_category(self, category_id):
         try:
-            self.cursor.execute("SELECT name, type FROM categories WHERE id = ?", (category_id,))
-            category = self.cursor.fetchone()
+            self.db_manager.execute("SELECT name, type FROM categories WHERE id = ?", (category_id,))
+            category = self.db_manager.fetchone()
             if not category:
                 QMessageBox.warning(self, "خطا", "دسته‌بندی یافت نشد!")
                 return
@@ -889,8 +891,8 @@ class FinanceApp(QMainWindow):
             return
         category_type = "income" if type_text == "درآمد" else "expense"
         try:
-            self.cursor.execute("UPDATE categories SET name = ?, type = ? WHERE id = ?", (name, category_type, category_id))
-            self.conn.commit()
+            self.db_manager.execute("UPDATE categories SET name = ?, type = ? WHERE id = ?", (name, category_type, category_id))
+            self.db_manager.commit()
             self.load_categories()
             self.load_categories_table()
             self.load_transactions()
@@ -903,8 +905,8 @@ class FinanceApp(QMainWindow):
         try:
             self.report_person.clear()
             self.report_person.addItem("-", None)
-            self.cursor.execute("SELECT id, name FROM persons")
-            persons = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name FROM persons")
+            persons = self.db_manager.fetchall()
             for id, name in persons:
                 self.report_person.addItem(name, id)
         except sqlite3.Error as e:
@@ -917,8 +919,8 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "نام دسته‌بندی نمی‌تواند خالی باشد!")
             return
         try:
-            self.cursor.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (name, category_type))
-            self.conn.commit()
+            self.db_manager.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (name, category_type))
+            self.db_manager.commit()
             self.category_name_input.clear()
             self.load_categories()  # به‌روزرسانی لیست دسته‌بندی‌ها برای بخش تراکنش
             self.load_categories_table()  # به‌روزرسانی جدول دسته‌بندی‌ها
@@ -956,16 +958,16 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "تاریخ نامعتبر است!")
             return
         try:
-            self.cursor.execute(
+            self.db_manager.execute(
                 "INSERT INTO transactions (account_id, person_id, category_id, amount, date, description) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (account_id, person_id, category_id, amount, date, desc)
             )
             if category_type == "income":
-                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
             else:
-                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
-            self.conn.commit()
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
+            self.db_manager.commit()
             self.transaction_amount.clear()
             self.transaction_date.clear()
             self.transaction_desc.clear()
@@ -979,8 +981,8 @@ class FinanceApp(QMainWindow):
     def delete_category(self, category_id):
         try:
             # بررسی استفاده از دسته‌بندی در تراکنش‌ها
-            self.cursor.execute("SELECT COUNT(*) FROM transactions WHERE category_id = ?", (category_id,))
-            if self.cursor.fetchone()[0] > 0:
+            self.db_manager.execute("SELECT COUNT(*) FROM transactions WHERE category_id = ?", (category_id,))
+            if self.db_manager.fetchone()[0] > 0:
                 QMessageBox.warning(self, "خطا", "این دسته‌بندی در تراکنش‌ها استفاده شده و نمی‌تواند حذف شود!")
                 return
 
@@ -992,8 +994,8 @@ class FinanceApp(QMainWindow):
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
-            self.cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
-            self.conn.commit()
+            self.db_manager.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+            self.db_manager.commit()
             self.load_categories()
             self.load_categories_table()
             self.load_transactions()
@@ -1003,12 +1005,12 @@ class FinanceApp(QMainWindow):
 
     def edit_transaction(self, transaction_id):
         try:
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT t.account_id, t.person_id, t.category_id, t.amount, t.date, t.description, c.type "
                 "FROM transactions t JOIN categories c ON t.category_id = c.id WHERE t.id = ?",
                 (transaction_id,)
             )
-            transaction = self.cursor.fetchone()
+            transaction = self.db_manager.fetchone()
             if not transaction:
                 QMessageBox.warning(self, "خطا", "تراکنش یافت نشد!")
                 return
@@ -1020,8 +1022,8 @@ class FinanceApp(QMainWindow):
             dialog.setLayout(layout)
 
             edit_account = QComboBox()
-            self.cursor.execute("SELECT id, name, balance FROM accounts")
-            accounts = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name, balance FROM accounts")
+            accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
                 display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
                 edit_account.addItem(display_text, acc_id)
@@ -1029,8 +1031,8 @@ class FinanceApp(QMainWindow):
 
             edit_person = QComboBox()
             edit_person.addItem("-", None)
-            self.cursor.execute("SELECT id, name FROM persons")
-            persons = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name FROM persons")
+            persons = self.db_manager.fetchall()
             for p_id, name in persons:
                 edit_person.addItem(name, p_id)
             if person_id:
@@ -1044,8 +1046,8 @@ class FinanceApp(QMainWindow):
             def update_categories():
                 edit_category.clear()
                 current_type = "income" if edit_type.currentText() == "درآمد" else "expense"
-                self.cursor.execute("SELECT id, name FROM categories WHERE type = ?", (current_type,))
-                categories = self.cursor.fetchall()
+                self.db_manager.execute("SELECT id, name FROM categories WHERE type = ?", (current_type,))
+                categories = self.db_manager.fetchall()
                 for cat_id, name in categories:
                     edit_category.addItem(name, cat_id)
                 if category_id:
@@ -1107,23 +1109,23 @@ class FinanceApp(QMainWindow):
 
             # خنثی کردن اثر تراکنش قدیمی
             if old_category_type == "income":
-                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
             else:
-                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_amount, old_account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_amount, old_account_id))
 
             # اعمال اثر تراکنش جدید
             if new_category_type == "income":
-                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
             else:
-                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
 
             # بروزرسانی در دیتابیس
-            self.cursor.execute(
+            self.db_manager.execute(
                 "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, amount = ?, date = ?, description = ? WHERE id = ?",
                 (account_id, person_id, category_id, amount, date, desc, transaction_id)
             )
 
-            self.conn.commit()
+            self.db_manager.commit()
             self.load_transactions()
             self.load_accounts()
             self.update_dashboard()
@@ -1157,17 +1159,17 @@ class FinanceApp(QMainWindow):
             return
         try:
             # بررسی موجودی حساب مبدأ
-            self.cursor.execute("SELECT balance FROM accounts WHERE id = ?", (from_account_id,))
-            balance = self.cursor.fetchone()[0]
+            self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (from_account_id,))
+            balance = self.db_manager.fetchone()[0]
             if balance < amount:
                 QMessageBox.warning(self, "خطا", "موجودی حساب مبدأ کافی نیست!")
                 return
 
             # بررسی وجود هر دو دسته‌بندی
-            self.cursor.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (خروج)' AND type = 'expense'")
-            expense_result = self.cursor.fetchone()
-            self.cursor.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (ورود)' AND type = 'income'")
-            income_result = self.cursor.fetchone()
+            self.db_manager.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (خروج)' AND type = 'expense'")
+            expense_result = self.db_manager.fetchone()
+            self.db_manager.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (ورود)' AND type = 'income'")
+            income_result = self.db_manager.fetchone()
             if not expense_result or not income_result:
                 QMessageBox.critical(self, "خطا", "دسته‌بندی‌های انتقال (ورود یا خروج) یافت نشدند!")
                 return
@@ -1175,22 +1177,22 @@ class FinanceApp(QMainWindow):
             income_category_id = income_result[0]
 
             # انجام تمام عملیات در یک تراکنش
-            with self.conn:
+            with self.db_manager:
                 # ثبت تراکنش خروج
-                self.cursor.execute(
+                self.db_manager.execute(
                     "INSERT INTO transactions (account_id, category_id, amount, date, description) "
                     "VALUES (?, ?, ?, ?, ?)",
                     (from_account_id, expense_category_id, amount, date, "انتقال به حساب دیگر")
                 )
                 # ثبت تراکنش ورود
-                self.cursor.execute(
+                self.db_manager.execute(
                     "INSERT INTO transactions (account_id, category_id, amount, date, description) "
                     "VALUES (?, ?, ?, ?, ?)",
                     (to_account_id, income_category_id, amount, date, "دریافت از حساب دیگر")
                 )
                 # به‌روزرسانی موجودی حساب‌ها
-                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, from_account_id))
-                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, to_account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, from_account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, to_account_id))
 
             self.transfer_amount.clear()
             self.transfer_date.clear()
@@ -1203,13 +1205,13 @@ class FinanceApp(QMainWindow):
 
     def load_transactions(self):
         try:
-            self.cursor.execute("SELECT COUNT(*) FROM transactions")
-            total_transactions = self.cursor.fetchone()[0]
+            self.db_manager.execute("SELECT COUNT(*) FROM transactions")
+            total_transactions = self.db_manager.fetchone()[0]
             self.transactions_total_pages = (total_transactions + self.transactions_per_page - 1) // self.transactions_per_page
             self.recent_total_pages = (total_transactions + self.recent_per_page - 1) // self.recent_per_page
 
             offset = (self.transactions_current_page - 1) * self.transactions_per_page
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type "
                 "FROM transactions t "
                 "JOIN accounts a ON t.account_id = a.id "
@@ -1218,10 +1220,10 @@ class FinanceApp(QMainWindow):
                 "ORDER BY t.date DESC LIMIT ? OFFSET ?",
                 (self.transactions_per_page, offset)
             )
-            transactions = self.cursor.fetchall()
+            transactions = self.db_manager.fetchall()
 
             offset_recent = (self.recent_current_page - 1) * self.recent_per_page
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type "
                 "FROM transactions t "
                 "JOIN accounts a ON t.account_id = a.id "
@@ -1230,7 +1232,7 @@ class FinanceApp(QMainWindow):
                 "ORDER BY t.date DESC LIMIT ? OFFSET ?",
                 (self.recent_per_page, offset_recent)
             )
-            recent_transactions = self.cursor.fetchall()
+            recent_transactions = self.db_manager.fetchall()
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             return
@@ -1293,12 +1295,12 @@ class FinanceApp(QMainWindow):
     def delete_transaction(self, transaction_id):
         # دریافت اطلاعات تراکنش برای معکوس کردن اثر آن
         try:
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT t.account_id, t.amount, c.type "
                 "FROM transactions t JOIN categories c ON t.category_id = c.id WHERE t.id = ?",
                 (transaction_id,)
             )
-            transaction = self.cursor.fetchone()
+            transaction = self.db_manager.fetchone()
             if not transaction:
                 QMessageBox.warning(self, "خطا", "تراکنش یافت نشد!")
                 return
@@ -1315,14 +1317,14 @@ class FinanceApp(QMainWindow):
             # معکوس کردن اثر تراکنش روی موجودی حساب
             if category_type == "income":
                 # اگر تراکنش درآمد بوده، مبلغ رو از حساب کم می‌کنیم
-                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
             else:
                 # اگر تراکنش هزینه بوده، مبلغ رو به حساب برمی‌گردونیم
-                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
 
             # حذف تراکنش از دیتابیس
-            self.cursor.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
-            self.conn.commit()
+            self.db_manager.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
+            self.db_manager.commit()
 
             # به‌روزرسانی جداول و داشبورد
             self.load_transactions()
@@ -1384,7 +1386,7 @@ class FinanceApp(QMainWindow):
             # شرط اصلاح‌شده برای ذخیره account_id در صورت وجود پرداخت
             account_id_to_save = account_id if has_payment else None
 
-            self.cursor.execute(
+            self.db_manager.execute(
                 "INSERT INTO debts (person_id, amount, due_date, is_paid, account_id, show_in_dashboard) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (person_id, amount, due_date, 0, account_id_to_save, 1 if show_in_dashboard else 0)
@@ -1392,9 +1394,9 @@ class FinanceApp(QMainWindow):
 
             # به‌روزرسانی موجودی فقط برای بدهی من (یعنی از حساب ما کم میشه)
             if has_payment and not is_credit and account_id:
-                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
 
-            self.conn.commit()
+            self.db_manager.commit()
             self.debt_amount.clear()
             self.debt_due_date.clear()
             self.debt_has_payment.setChecked(False)
@@ -1409,11 +1411,11 @@ class FinanceApp(QMainWindow):
 
     def edit_debt(self, debt_id):
         try:
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT person_id, amount, account_id, due_date, is_paid, show_in_dashboard FROM debts WHERE id = ?",
                 (debt_id,)
             )
-            debt = self.cursor.fetchone()
+            debt = self.db_manager.fetchone()
             if not debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 return
@@ -1425,8 +1427,8 @@ class FinanceApp(QMainWindow):
             dialog.setLayout(layout)
 
             edit_person = QComboBox()
-            self.cursor.execute("SELECT id, name FROM persons")
-            persons = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name FROM persons")
+            persons = self.db_manager.fetchall()
             for p_id, name in persons:
                 edit_person.addItem(name, p_id)
             edit_person.setCurrentText([name for p_id, name in persons if p_id == person_id][0])
@@ -1435,8 +1437,8 @@ class FinanceApp(QMainWindow):
             edit_amount.setText(str(amount))
 
             edit_account = QComboBox()
-            self.cursor.execute("SELECT id, name, balance FROM accounts")
-            accounts = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name, balance FROM accounts")
+            accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
                 display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
                 edit_account.addItem(display_text, acc_id)
@@ -1504,8 +1506,8 @@ class FinanceApp(QMainWindow):
 
         try:
             # دریافت اطلاعات بدهی قبلی برای حذف اثر آن
-            self.cursor.execute("SELECT amount, account_id FROM debts WHERE id = ?", (debt_id,))
-            old_debt = self.cursor.fetchone()
+            self.db_manager.execute("SELECT amount, account_id FROM debts WHERE id = ?", (debt_id,))
+            old_debt = self.db_manager.fetchone()
             if not old_debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 return
@@ -1516,26 +1518,26 @@ class FinanceApp(QMainWindow):
 
             # بررسی موجودی حساب در صورت نیاز
             if has_payment and not is_credit and account_id:
-                self.cursor.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
-                balance = self.cursor.fetchone()[0]
+                self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
+                balance = self.db_manager.fetchone()[0]
                 if balance < amount:
                     QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
                     return
 
             # حذف اثر قبلی از حساب قبلی
             if old_account_id:
-                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
 
             # اعمال اثر جدید در صورت نیاز (فقط برای بدهی من)
             if has_payment and not is_credit and account_id:
-                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
 
             # ذخیره در دیتابیس
-            self.cursor.execute(
+            self.db_manager.execute(
                 "UPDATE debts SET person_id = ?, amount = ?, account_id = ?, due_date = ?, is_paid = 0, show_in_dashboard = ? WHERE id = ?",
                 (person_id, amount, account_id_to_save, due_date, 1 if show_in_dashboard else 0, debt_id)
             )
-            self.conn.commit()
+            self.db_manager.commit()
             self.load_debts()
             self.load_accounts()
             dialog.accept()
@@ -1547,18 +1549,18 @@ class FinanceApp(QMainWindow):
 
     def load_debts(self):
         try:
-            self.cursor.execute("SELECT COUNT(*) FROM debts")
-            total_debts = self.cursor.fetchone()[0]
+            self.db_manager.execute("SELECT COUNT(*) FROM debts")
+            total_debts = self.db_manager.fetchone()[0]
             self.debts_total_pages = (total_debts + self.debts_per_page - 1) // self.debts_per_page
 
             offset = (self.debts_current_page - 1) * self.debts_per_page
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, d.is_paid, COALESCE(a.name, '-') "
                 "FROM debts d JOIN persons p ON d.person_id = p.id LEFT JOIN accounts a ON d.account_id = a.id "
                 "LIMIT ? OFFSET ?",
                 (self.debts_per_page, offset)
             )
-            debts = self.cursor.fetchall()
+            debts = self.db_manager.fetchall()
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             return
@@ -1603,12 +1605,12 @@ class FinanceApp(QMainWindow):
 
     def settle_debt(self, debt_id):
         try:
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT d.person_id, d.amount, d.paid_amount, d.account_id, p.name "
                 "FROM debts d JOIN persons p ON d.person_id = p.id WHERE d.id = ?",
                 (debt_id,)
             )
-            debt = self.cursor.fetchone()
+            debt = self.db_manager.fetchone()
             if not debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 return
@@ -1631,8 +1633,8 @@ class FinanceApp(QMainWindow):
 
             # انتخاب حساب
             settle_account = QComboBox()
-            self.cursor.execute("SELECT id, name, balance FROM accounts")
-            accounts = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name, balance FROM accounts")
+            accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
                 display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
                 settle_account.addItem(display_text, acc_id)
@@ -1668,8 +1670,8 @@ class FinanceApp(QMainWindow):
 
             # بررسی موجودی حساب در صورت نیاز
             if has_payment and account_id:
-                self.cursor.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
-                balance = self.cursor.fetchone()[0]
+                self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
+                balance = self.db_manager.fetchone()[0]
                 if is_credit:  # طلب من: دریافت پول (اضافه کردن به حساب)
                     pass  # نیازی به بررسی موجودی نیست چون پول اضافه می‌شه
                 else:  # بدهی من: پرداخت پول (کم کردن از حساب)
@@ -1678,7 +1680,7 @@ class FinanceApp(QMainWindow):
                         return
 
             # به‌روزرسانی وضعیت بدهی/طلب
-            self.cursor.execute(
+            self.db_manager.execute(
                 "UPDATE debts SET is_paid = 1, paid_amount = amount WHERE id = ?",
                 (debt_id,)
             )
@@ -1686,11 +1688,11 @@ class FinanceApp(QMainWindow):
             # به‌روزرسانی حساب در صورت پرداخت/دریافت
             if has_payment and account_id:
                 if is_credit:  # طلب من: پول دریافت می‌شه
-                    self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (remaining_amount, account_id))
+                    self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (remaining_amount, account_id))
                 else:  # بدهی من: پول پرداخت می‌شه
-                    self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (remaining_amount, account_id))
+                    self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (remaining_amount, account_id))
 
-            self.conn.commit()
+            self.db_manager.commit()
             self.load_debts()
             self.load_accounts()
             self.update_dashboard()
@@ -1702,11 +1704,11 @@ class FinanceApp(QMainWindow):
     def delete_debt(self, debt_id):
         try:
             # دریافت اطلاعات بدهی برای معکوس کردن اثر آن
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT d.account_id, d.amount, d.paid_amount FROM debts d WHERE d.id = ?",
                 (debt_id,)
             )
-            debt = self.cursor.fetchone()
+            debt = self.db_manager.fetchone()
             if not debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 return
@@ -1723,11 +1725,11 @@ class FinanceApp(QMainWindow):
             # معکوس کردن اثر بدهی روی موجودی حساب (اگر پولی دریافت شده و نوع "بدهی من" باشد)
             if account_id:  # account_id وجود داره، یعنی پولی دریافت شده
                 remaining_amount = amount - paid_amount  # فقط مبلغ باقی‌مانده رو معکوس می‌کنیم
-                self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (remaining_amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (remaining_amount, account_id))
 
             # حذف بدهی/طلب از دیتابیس
-            self.cursor.execute("DELETE FROM debts WHERE id = ?", (debt_id,))
-            self.conn.commit()
+            self.db_manager.execute("DELETE FROM debts WHERE id = ?", (debt_id,))
+            self.db_manager.commit()
 
             # به‌روزرسانی جدول و حساب‌ها
             self.load_debts()
@@ -1785,19 +1787,19 @@ class FinanceApp(QMainWindow):
             return
         try:
             # بررسی وجود حساب
-            self.cursor.execute("SELECT id FROM accounts WHERE id = ?", (account_id,))
-            if not self.cursor.fetchone():
+            self.db_manager.execute("SELECT id FROM accounts WHERE id = ?", (account_id,))
+            if not self.db_manager.fetchone():
                 QMessageBox.warning(self, "خطا", "حساب انتخاب‌شده معتبر نیست!")
                 return
 
-            self.cursor.execute(
+            self.db_manager.execute(
                 "INSERT INTO loans (type, bank_name, total_amount, paid_amount, interest_rate, start_date, end_date, account_id, installments_total, installments_paid) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (loan_type, bank_name, amount, 0, interest, start_date, end_date, account_id, installments_total, installments_paid)
             )
             if loan_type == "taken":
-                self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
-            self.conn.commit()
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+            self.db_manager.commit()
             self.loan_bank.clear()
             self.loan_amount.clear()
             self.loan_interest.clear()
@@ -1813,12 +1815,12 @@ class FinanceApp(QMainWindow):
 
     def edit_loan(self, loan_id):
         try:
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT type, bank_name, total_amount, interest_rate, account_id, start_date, end_date, installments_total, installments_paid "
                 "FROM loans WHERE id = ?",
                 (loan_id,)
             )
-            loan = self.cursor.fetchone()
+            loan = self.db_manager.fetchone()
             if not loan:
                 QMessageBox.warning(self, "خطا", "وام یافت نشد!")
                 return
@@ -1840,8 +1842,8 @@ class FinanceApp(QMainWindow):
             edit_interest.setText(str(interest_rate))
 
             edit_account = QComboBox()
-            self.cursor.execute("SELECT id, name, balance FROM accounts")
-            accounts = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name, balance FROM accounts")
+            accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
                 display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
                 edit_account.addItem(display_text, acc_id)
@@ -1915,11 +1917,11 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", f"مقادیر عددی یا تاریخ‌ها نامعتبر! {str(e)}")
             return
         try:
-            self.cursor.execute(
+            self.db_manager.execute(
                 "UPDATE loans SET type = ?, bank_name = ?, total_amount = ?, interest_rate = ?, account_id = ?, start_date = ?, end_date = ?, installments_total = ?, installments_paid = ? WHERE id = ?",
                 (loan_type, bank_name, amount, interest, account_id, start_date, end_date, installments_total, installments_paid, loan_id)
             )
-            self.conn.commit()
+            self.db_manager.commit()
             self.load_loans()
             self.load_accounts()
             dialog.accept()
@@ -1929,18 +1931,18 @@ class FinanceApp(QMainWindow):
 
     def load_loans(self):
         try:
-            self.cursor.execute("SELECT COUNT(*) FROM loans")
-            total_loans = self.cursor.fetchone()[0]
+            self.db_manager.execute("SELECT COUNT(*) FROM loans")
+            total_loans = self.db_manager.fetchone()[0]
             self.loans_total_pages = (total_loans + self.loans_per_page - 1) // self.loans_per_page
 
             offset = (self.loans_current_page - 1) * self.loans_per_page
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT l.id, l.type, l.bank_name, l.total_amount, l.paid_amount, l.interest_rate, l.start_date, l.end_date, l.installments_total, l.installments_paid "
                 "FROM loans l LEFT JOIN accounts a ON l.account_id = a.id "
                 "LIMIT ? OFFSET ?",
                 (self.loans_per_page, offset)
             )
-            loans = self.cursor.fetchall()
+            loans = self.db_manager.fetchall()
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             return
@@ -1990,8 +1992,8 @@ class FinanceApp(QMainWindow):
 
     def edit_loan_installments(self, loan_id):
         try:
-            self.cursor.execute("SELECT total_amount, installments_total, installments_paid, start_date FROM loans WHERE id = ?", (loan_id,))
-            loan = self.cursor.fetchone()
+            self.db_manager.execute("SELECT total_amount, installments_total, installments_paid, start_date FROM loans WHERE id = ?", (loan_id,))
+            loan = self.db_manager.fetchone()
             if not loan:
                 QMessageBox.warning(self, "خطا", "وام یافت نشد!")
                 return
@@ -2007,18 +2009,18 @@ class FinanceApp(QMainWindow):
             installments_table.setColumnCount(5)
             installments_table.setHorizontalHeaderLabels(["شماره قسط", "مبلغ", "سررسید", "پرداخت شده", "اقدام"])
             installments_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-            self.cursor.execute("SELECT id, amount, due_date, is_paid FROM loan_installments WHERE loan_id = ?", (loan_id,))
-            installments = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, amount, due_date, is_paid FROM loan_installments WHERE loan_id = ?", (loan_id,))
+            installments = self.db_manager.fetchall()
             if not installments:
                 start_date = jdatetime.date.fromgregorian(date=datetime.strptime(start_date, "%Y-%m-%d"))
                 for i in range(installments_total):
                     due_date = start_date + jdatetime.timedelta(days=i * 30)
                     due_date_str = due_date.togregorian().strftime("%Y-%m-%d")
-                    self.cursor.execute("INSERT INTO loan_installments (loan_id, amount, due_date, is_paid) VALUES (?, ?, ?, ?)", 
+                    self.db_manager.execute("INSERT INTO loan_installments (loan_id, amount, due_date, is_paid) VALUES (?, ?, ?, ?)", 
                                     (loan_id, installment_amount, due_date_str, 1 if i < installments_paid else 0))
-                    self.conn.commit()
-                self.cursor.execute("SELECT id, amount, due_date, is_paid FROM loan_installments WHERE loan_id = ?", (loan_id,))
-                installments = self.cursor.fetchall()
+                    self.db_manager.commit()
+                self.db_manager.execute("SELECT id, amount, due_date, is_paid FROM loan_installments WHERE loan_id = ?", (loan_id,))
+                installments = self.db_manager.fetchall()
             installments_table.setRowCount(len(installments))
             for row, (inst_id, amount, due_date, is_paid) in enumerate(installments):
                 installments_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
@@ -2041,16 +2043,16 @@ class FinanceApp(QMainWindow):
 
     def confirm_payment(self, loan_id, row, amount, account_id, dialog):
         try:
-            self.cursor.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
-            balance = self.cursor.fetchone()[0]
+            self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
+            balance = self.db_manager.fetchone()[0]
             if balance < amount:
                 QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
                 return
 
-            self.cursor.execute("UPDATE loan_installments SET is_paid = 1 WHERE loan_id = ? LIMIT 1 OFFSET ?", (loan_id, row))
-            self.cursor.execute("UPDATE loans SET paid_amount = paid_amount + ?, installments_paid = installments_paid + 1 WHERE id = ?", (amount, loan_id))
-            self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
-            self.conn.commit()
+            self.db_manager.execute("UPDATE loan_installments SET is_paid = 1 WHERE loan_id = ? LIMIT 1 OFFSET ?", (loan_id, row))
+            self.db_manager.execute("UPDATE loans SET paid_amount = paid_amount + ?, installments_paid = installments_paid + 1 WHERE id = ?", (amount, loan_id))
+            self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
+            self.db_manager.commit()
             self.load_loans()
             self.load_accounts()
             dialog.accept()
@@ -2064,8 +2066,8 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "نام شخص نمی‌تواند خالی باشد!")
             return
         try:
-            self.cursor.execute("INSERT INTO persons (name) VALUES (?)", (name,))
-            self.conn.commit()
+            self.db_manager.execute("INSERT INTO persons (name) VALUES (?)", (name,))
+            self.db_manager.commit()
             self.person_name_input.clear()
             self.load_persons()
             self.load_report_persons()
@@ -2075,8 +2077,8 @@ class FinanceApp(QMainWindow):
 
     def load_persons(self):
         try:
-            self.cursor.execute("SELECT id, name FROM persons")
-            persons = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, name FROM persons")
+            persons = self.db_manager.fetchall()
             self.persons_table.setRowCount(len(persons))
             self.transaction_person.clear()
             self.debt_person.clear()
@@ -2096,8 +2098,8 @@ class FinanceApp(QMainWindow):
 
     def edit_person(self, person_id):
         try:
-            self.cursor.execute("SELECT name FROM persons WHERE id = ?", (person_id,))
-            person = self.cursor.fetchone()
+            self.db_manager.execute("SELECT name FROM persons WHERE id = ?", (person_id,))
+            person = self.db_manager.fetchone()
             if not person:
                 QMessageBox.warning(self, "خطا", "شخص یافت نشد!")
                 return
@@ -2126,8 +2128,8 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "نام شخص نمی‌تواند خالی باشد!")
             return
         try:
-            self.cursor.execute("UPDATE persons SET name = ? WHERE id = ?", (name, person_id))
-            self.conn.commit()
+            self.db_manager.execute("UPDATE persons SET name = ? WHERE id = ?", (name, person_id))
+            self.db_manager.commit()
             self.load_persons()
             self.load_report_persons()
             dialog.accept()
@@ -2138,8 +2140,8 @@ class FinanceApp(QMainWindow):
     def update_dashboard(self):
         try:
             # به‌روزرسانی موجودی کل
-            self.cursor.execute("SELECT SUM(balance) FROM accounts")
-            total_balance = self.cursor.fetchone()[0] or 0
+            self.db_manager.execute("SELECT SUM(balance) FROM accounts")
+            total_balance = self.db_manager.fetchone()[0] or 0
             self.total_balance_label.setText(f"موجودی کل: {format_number(total_balance)} تومان")
 
             # بارگذاری بدهی‌ها و طلب‌های مهم
@@ -2148,14 +2150,14 @@ class FinanceApp(QMainWindow):
             today_str = today.togregorian().strftime("%Y-%m-%d")
             fifteen_days_later_str = fifteen_days_later.togregorian().strftime("%Y-%m-%d")
 
-            self.cursor.execute(
+            self.db_manager.execute(
                 "SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, d.is_paid, COALESCE(a.name, '-') "
                 "FROM debts d JOIN persons p ON d.person_id = p.id LEFT JOIN accounts a ON d.account_id = a.id "
                 "WHERE d.show_in_dashboard = 1 AND d.is_paid = 0 AND d.due_date IS NOT NULL "
                 "AND (d.due_date <= ? OR (d.due_date >= ? AND d.due_date <= ?))",
                 (today_str, today_str, fifteen_days_later_str)
             )
-            debts = self.cursor.fetchall()
+            debts = self.db_manager.fetchall()
 
             self.important_debts_table.setRowCount(len(debts))
             for row, (id, person, amount, paid, due_date, is_paid, account) in enumerate(debts):
@@ -2172,8 +2174,8 @@ class FinanceApp(QMainWindow):
     def check_reminders(self):
         today = jdatetime.date.today().togregorian().strftime("%Y-%m-%d")
         try:
-            self.cursor.execute("SELECT id, amount, due_date FROM debts WHERE is_paid = 0 AND due_date IS NOT NULL AND due_date <= ?", (today,))
-            debts = self.cursor.fetchall()
+            self.db_manager.execute("SELECT id, amount, due_date FROM debts WHERE is_paid = 0 AND due_date IS NOT NULL AND due_date <= ?", (today,))
+            debts = self.db_manager.fetchall()
             for debt in debts:
                 QMessageBox.warning(self, "یادآوری", f"بدهی به مبلغ {format_number(debt[1])} تومان تا {gregorian_to_shamsi(debt[2])} سررسید شده!")
         except sqlite3.Error as e:
@@ -2265,8 +2267,8 @@ class FinanceApp(QMainWindow):
                 params = (start_date_g, end_date_g)
 
             if query:
-                self.cursor.execute(query, params)
-                results = self.cursor.fetchall()
+                self.db_manager.execute(query, params)
+                results = self.db_manager.fetchall()
                 report_dialog = QDialog(self)
                 report_dialog.setWindowTitle("گزارش مالی")
                 layout = QVBoxLayout()
@@ -2313,7 +2315,7 @@ class FinanceApp(QMainWindow):
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
     def closeEvent(self, event):
-        self.conn.close()
+        self.db_manager.close()
         event.accept()
 
 if __name__ == "__main__":
