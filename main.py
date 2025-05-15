@@ -211,16 +211,23 @@ class NumberInput(QLineEdit):
 
     def format_input(self):
         text = self.text().replace(",", "")  # حذف جداکننده‌ها برای پردازش
+        if text and (text.startswith('-') or text == '0'):
+            self.setStyleSheet("background-color: #ffe6e6;")  # رنگ پس‌زمینه قرمز برای خطا
+            return
         if text.isdigit():
             formatted = format_number(int(text))
             self.setText(formatted)
+            self.setStyleSheet("")  # بازگرداندن استایل پیش‌فرض
             self.setCursorPosition(len(formatted))  # مکان‌نما رو آخر متن می‌بره
 
     def get_raw_value(self):
         text = self.text().replace(",", "")
         if text.isdigit():
-            return int(text)
-        return 0  # یا مقدار پیش‌فرض دیگر
+            value = int(text)
+            if value <= 0:
+                return None  # مقادیر صفر یا منفی نامعتبر هستند
+            return value
+        return None  # یا مقدار پیش‌فرض دیگر
 
 class FinanceApp(QMainWindow):
     def __init__(self):
