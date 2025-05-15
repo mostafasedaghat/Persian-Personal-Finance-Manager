@@ -228,60 +228,11 @@ class FinanceApp(QMainWindow):
         self.setWindowTitle("نرم‌افزار حسابداری شخصی - حرفه‌ای")
         self.setGeometry(100, 100, 1200, 900)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f5f5f5;
-                font-family: Vazir, Arial;
-            }
-            QTabWidget::pane {
-                border: 1px solid #ccc;
-                border-radius: 5px;
-            }
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-family: Vazir, Arial;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QTableWidget {
-                background-color: white;
-                color: black;
-                font-family: Vazir, Arial;
-                border: 1px solid #ddd;
-                border-radius: 5px;
-            }
-            QTableWidget QTableCornerButton::section {
-                background-color: #4CAF50;
-                border: none;
-            }
-            QTableWidget QHeaderView::section {
-                background-color: #4CAF50;
-                color: white;
-                padding: 5px;
-                border: none;
-                font-family: Vazir, Arial;
-            }
-            QLineEdit, QComboBox, QLabel {
-                background-color: white;
-                color: black;
-                font-family: Vazir, Arial;
-            }
-            PersianCalendarWidget QPushButton {
-                background-color: #666;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                font-family: Vazir, Arial;
-            }
-            PersianCalendarWidget QPushButton:hover {
-                background-color: #555;
-            }
-        """)
-        
+
+        # بارگذاری استایل‌ها
+        with open('styles.qss', 'r', encoding='utf-8') as f:
+            self.setStyleSheet(f.read())
+
         self.init_db()
         self.init_ui()
         self.load_data()
