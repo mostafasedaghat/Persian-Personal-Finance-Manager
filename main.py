@@ -1364,7 +1364,7 @@ class FinanceApp(QMainWindow):
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
             return
-        # بررسی تاریخ فقط در صورتی که وارد شده باشه
+
         due_date = None
         if shamsi_due_date:
             if not is_valid_shamsi_date(shamsi_due_date):
@@ -1381,14 +1381,19 @@ class FinanceApp(QMainWindow):
                 return
 
         try:
+            # شرط اصلاح‌شده برای ذخیره account_id در صورت وجود پرداخت
+            account_id_to_save = account_id if has_payment else None
+
             self.cursor.execute(
                 "INSERT INTO debts (person_id, amount, due_date, is_paid, account_id, show_in_dashboard) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (person_id, amount, due_date, 0, account_id if has_payment and not is_credit else None, 1 if show_in_dashboard else 0)
+                (person_id, amount, due_date, 0, account_id_to_save, 1 if show_in_dashboard else 0)
             )
-            # اگر پولی دریافت/پرداخت شده و نوع "بدهی من" هست، موجودی حساب رو تغییر بده
+
+            # به‌روزرسانی موجودی فقط برای بدهی من (یعنی از حساب ما کم میشه)
             if has_payment and not is_credit and account_id:
                 self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+
             self.conn.commit()
             self.debt_amount.clear()
             self.debt_due_date.clear()
@@ -1397,8 +1402,10 @@ class FinanceApp(QMainWindow):
             self.load_debts()
             self.load_accounts()
             QMessageBox.information(self, "موفق", "بدهی/طلب با موفقیت ثبت شد!")
+
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
 
     def edit_debt(self, debt_id):
         try:
@@ -1479,6 +1486,7 @@ class FinanceApp(QMainWindow):
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
             return
+
         due_date = None
         if shamsi_due_date:
             if not is_valid_shamsi_date(shamsi_due_date):
@@ -1493,8 +1501,9 @@ class FinanceApp(QMainWindow):
             except ValueError:
                 QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
                 return
+
         try:
-            # دریافت اطلاعات بدهی قدیمی برای معکوس کردن اثر
+            # دریافت اطلاعات بدهی قبلی برای حذف اثر آن
             self.cursor.execute("SELECT amount, account_id FROM debts WHERE id = ?", (debt_id,))
             old_debt = self.cursor.fetchone()
             if not old_debt:
@@ -1502,8 +1511,8 @@ class FinanceApp(QMainWindow):
                 return
             old_amount, old_account_id = old_debt
 
-            # تعیین account_id جدید
-            account_id_to_save = account_id if has_payment and not is_credit else None
+            # مشخص کردن account_id جدید برای ذخیره
+            account_id_to_save = account_id if has_payment else None
 
             # بررسی موجودی حساب در صورت نیاز
             if has_payment and not is_credit and account_id:
@@ -1513,15 +1522,15 @@ class FinanceApp(QMainWindow):
                     QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
                     return
 
-            # معکوس کردن اثر بدهی قدیمی (اگر account_id وجود داشت)
+            # حذف اثر قبلی از حساب قبلی
             if old_account_id:
                 self.cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
 
-            # اعمال اثر بدهی جدید
+            # اعمال اثر جدید در صورت نیاز (فقط برای بدهی من)
             if has_payment and not is_credit and account_id:
                 self.cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
 
-            # به‌روزرسانی بدهی/طلب
+            # ذخیره در دیتابیس
             self.cursor.execute(
                 "UPDATE debts SET person_id = ?, amount = ?, account_id = ?, due_date = ?, is_paid = 0, show_in_dashboard = ? WHERE id = ?",
                 (person_id, amount, account_id_to_save, due_date, 1 if show_in_dashboard else 0, debt_id)
@@ -1531,8 +1540,10 @@ class FinanceApp(QMainWindow):
             self.load_accounts()
             dialog.accept()
             QMessageBox.information(self, "موفق", "بدهی/طلب با موفقیت ویرایش شد!")
+
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
 
     def load_debts(self):
         try:
