@@ -476,9 +476,13 @@ class FinanceApp(QMainWindow):
         form_layout.addRow("موجودی اولیه:", self.account_balance_input)
         form_layout.addRow(add_account_btn)
         self.accounts_table = QTableWidget()
-        self.accounts_table.setColumnCount(3)
-        self.accounts_table.setHorizontalHeaderLabels(["شناسه", "نام حساب", "موجودی"])
+        self.accounts_table.setColumnCount(4)  # اضافه کردن ستون اقدامات
+        self.accounts_table.setHorizontalHeaderLabels(["شناسه", "نام حساب", "موجودی", "اقدامات"])
         self.accounts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.accounts_table.setColumnWidth(0, 50)   # شناسه
+        self.accounts_table.setColumnWidth(1, 200)  # نام حساب
+        self.accounts_table.setColumnWidth(2, 150)  # موجودی
+        self.accounts_table.setColumnWidth(3, 80)   # اقدامات
         layout.addLayout(form_layout)
         layout.addWidget(self.accounts_table)
         tab.setLayout(layout)
@@ -802,6 +806,11 @@ class FinanceApp(QMainWindow):
                 self.accounts_table.setItem(row, 0, QTableWidgetItem(str(id)))
                 self.accounts_table.setItem(row, 1, QTableWidgetItem(name))
                 self.accounts_table.setItem(row, 2, QTableWidgetItem(format_number(balance)))
+                # اضافه کردن دکمه ویرایش
+                edit_btn = QPushButton("ویرایش")
+                edit_btn.clicked.connect(lambda checked, acc_id=id: self.edit_account(acc_id))
+                self.accounts_table.setCellWidget(row, 3, edit_btn)
+                # پر کردن لیست‌های کشویی
                 display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
                 self.transaction_account.addItem(display_text, id)
                 self.debt_account.addItem(display_text, id)
@@ -824,6 +833,46 @@ class FinanceApp(QMainWindow):
             self.account_balance_input.clear()
             self.load_accounts()
             QMessageBox.information(self, "موفق", "حساب با موفقیت افزوده شد!")
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def edit_account(self, account_id):
+        try:
+            self.db_manager.execute("SELECT name FROM accounts WHERE id = ?", (account_id,))
+            account = self.db_manager.fetchone()
+            if not account:
+                QMessageBox.warning(self, "خطا", "حساب یافت نشد!")
+                return
+            name = account[0]
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("ویرایش نام حساب")
+            layout = QFormLayout()
+            edit_name = QLineEdit(name)
+            save_btn = QPushButton("ذخیره")
+            save_btn.clicked.connect(lambda: self.save_account(account_id, edit_name.text(), dialog))
+            layout.addRow("نام حساب:", edit_name)
+            layout.addRow(save_btn)
+            dialog.setLayout(layout)
+            dialog.exec()
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def save_account(self, account_id, name, dialog):
+        if not name:
+            QMessageBox.warning(self, "خطا", "نام حساب نمی‌تواند خالی باشد!")
+            return
+        try:
+            # بررسی تکراری نبودن نام حساب
+            self.db_manager.execute("SELECT id FROM accounts WHERE name = ? AND id != ?", (name, account_id))
+            if self.db_manager.fetchone():
+                QMessageBox.warning(self, "خطا", "حسابی با این نام قبلاً وجود دارد!")
+                return
+            self.db_manager.execute("UPDATE accounts SET name = ? WHERE id = ?", (name, account_id))
+            self.db_manager.commit()
+            self.load_accounts()
+            dialog.accept()
+            QMessageBox.information(self, "موفق", "نام حساب با موفقیت ویرایش شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
