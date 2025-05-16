@@ -11,7 +11,7 @@ from PyQt6.QtCore import QDate, Qt, QTimer, QLocale  # اضافه کردن QLoca
 from PyQt6.QtGui import QIcon, QFont, QColor
 import sqlite3
 import jdatetime
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # تنظیم locale برای جداکننده اعداد
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
@@ -254,7 +254,6 @@ class FinanceApp(QMainWindow):
 
     def init_db(self):
         try:
-            
             self.db_manager.executescript("""
                 CREATE TABLE IF NOT EXISTS accounts (
                     id INTEGER PRIMARY KEY,
@@ -283,10 +282,11 @@ class FinanceApp(QMainWindow):
                     person_id INTEGER,
                     amount REAL,
                     paid_amount REAL DEFAULT 0,
-                    due_date TEXT,  -- nullable
+                    due_date TEXT,
                     is_paid INTEGER DEFAULT 0,
                     account_id INTEGER,
-                    show_in_dashboard INTEGER DEFAULT 0,  -- ستون جدید
+                    show_in_dashboard INTEGER DEFAULT 0,
+                    is_credit INTEGER DEFAULT 0,
                     FOREIGN KEY (person_id) REFERENCES persons(id),
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 );
@@ -298,10 +298,11 @@ class FinanceApp(QMainWindow):
                     paid_amount REAL DEFAULT 0,
                     interest_rate REAL,
                     start_date TEXT,
-                    end_date TEXT,
                     account_id INTEGER,
                     installments_total INTEGER,
                     installments_paid INTEGER DEFAULT 0,
+                    installment_amount REAL,
+                    installment_interval INTEGER DEFAULT 30,  -- ستون جدید
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 );
                 CREATE TABLE IF NOT EXISTS loan_installments (
@@ -319,16 +320,66 @@ class FinanceApp(QMainWindow):
             """)
             self.db_manager.commit()
 
-            # اضافه کردن ستون show_in_dashboard اگر وجود نداشته باشه
+            # بررسی و به‌روزرسانی ستون‌های جدول debts
             self.db_manager.execute("PRAGMA table_info(debts)")
             columns = [col[1] for col in self.db_manager.fetchall()]
             if "is_credit" not in columns:
                 self.db_manager.execute("ALTER TABLE debts ADD COLUMN is_credit INTEGER DEFAULT 0")
             if "show_in_dashboard" not in columns:
                 self.db_manager.execute("ALTER TABLE debts ADD COLUMN show_in_dashboard INTEGER DEFAULT 0")
+
+            # به‌روزرسانی جدول loans برای حذف end_date و افزودن installment_amount و installment_interval
+            self.db_manager.execute("PRAGMA table_info(loans)")
+            loan_columns = [col[1] for col in self.db_manager.fetchall()]
+            if "installment_amount" not in loan_columns:
+                self.db_manager.execute("ALTER TABLE loans ADD COLUMN installment_amount REAL")
+            if "installment_interval" not in loan_columns:
+                self.db_manager.execute("ALTER TABLE loans ADD COLUMN installment_interval INTEGER DEFAULT 30")
+            if "end_date" in loan_columns:
+                self.db_manager.executescript("""
+                    CREATE TABLE loans_temp AS 
+                    SELECT id, type, bank_name, total_amount, paid_amount, interest_rate, 
+                        start_date, account_id, installments_total, installments_paid, 
+                        installment_amount, installment_interval 
+                    FROM loans;
+                    DROP TABLE loans;
+                    CREATE TABLE loans (
+                        id INTEGER PRIMARY KEY,
+                        type TEXT CHECK(type IN ('taken', 'given')),
+                        bank_name TEXT,
+                        total_amount REAL,
+                        paid_amount REAL DEFAULT 0,
+                        interest_rate REAL,
+                        start_date TEXT,
+                        account_id INTEGER,
+                        installments_total INTEGER,
+                        installments_paid INTEGER DEFAULT 0,
+                        installment_amount REAL,
+                        installment_interval INTEGER DEFAULT 30,
+                        FOREIGN KEY (account_id) REFERENCES accounts(id)
+                    );
+                    INSERT INTO loans 
+                    SELECT * FROM loans_temp;
+                    DROP TABLE loans_temp;
+                """)
+            # تنظیم مقدار پیش‌فرض برای installment_interval در ردیف‌های قدیمی
+            self.db_manager.execute(
+                "UPDATE loans SET installment_interval = 30 WHERE installment_interval IS NULL"
+            )
+            # به‌روزرسانی installment_amount برای ردیف‌هایی که NULL هستند
+            self.db_manager.execute(
+                """
+                UPDATE loans 
+                SET installment_amount = COALESCE(installment_amount, total_amount / installments_total)
+                WHERE installment_amount IS NULL AND installments_total > 0
+                """
+            )
+            self.db_manager.execute(
+                "UPDATE loans SET installment_amount = 0 WHERE installment_amount IS NULL"
+            )
             self.db_manager.commit()
 
-            # بررسی وجود دسته‌بندی‌ها قبل از درج
+            # افزودن دسته‌بندی‌های پیش‌فرض
             self.db_manager.execute("SELECT COUNT(*) FROM categories")
             if self.db_manager.fetchone()[0] == 0:
                 self.db_manager.executescript("""
@@ -658,7 +709,6 @@ class FinanceApp(QMainWindow):
         self.loan_interest = NumberInput()
         self.loan_account = QComboBox()
         self.loan_start_date = QLineEdit()
-        # تنظیم تاریخ پیش‌فرض به امروز
         today = datetime.now().date()
         self.loan_start_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.loan_start_date.setPlaceholderText("1404/02/13")
@@ -666,38 +716,50 @@ class FinanceApp(QMainWindow):
         self.loan_start_date.mousePressEvent = lambda event: self.show_calendar_popup(self.loan_start_date)
         self.loan_installments_total = NumberInput()
         self.loan_installments_paid = NumberInput()
-        self.loan_end_date = QLineEdit()
-        self.loan_end_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
-        self.loan_end_date.setPlaceholderText("1405/02/13")
-        self.loan_end_date.setReadOnly(True)
-        self.loan_end_date.mousePressEvent = lambda event: self.show_calendar_popup(self.loan_end_date)
+        self.loan_installment_amount = NumberInput()
+        self.loan_installment_interval = NumberInput()  # فیلد جدید برای فاصله اقساط
+        self.loan_installment_interval.setPlaceholderText("30")  # پیش‌فرض 30 روز
         add_loan_btn = QPushButton("ثبت وام")
         add_loan_btn.clicked.connect(self.add_loan)
         form_layout.addRow("نوع وام:", self.loan_type)
         form_layout.addRow("نام بانک:", self.loan_bank)
-        form_layout.addRow("مبلغ:", self.loan_amount)
+        form_layout.addRow("مبلغ کل:", self.loan_amount)
         form_layout.addRow("نرخ سود (%):", self.loan_interest)
         form_layout.addRow("حساب مرتبط:", self.loan_account)
         form_layout.addRow("تاریخ شروع (شمسی):", self.loan_start_date)
         form_layout.addRow("تعداد اقساط کل:", self.loan_installments_total)
         form_layout.addRow("تعداد اقساط پرداخت‌شده:", self.loan_installments_paid)
-        form_layout.addRow("تاریخ پایان (شمسی):", self.loan_end_date)
+        form_layout.addRow("مبلغ هر قسط:", self.loan_installment_amount)
+        form_layout.addRow("فاصله اقساط (روز):", self.loan_installment_interval)  # فیلد جدید
         form_layout.addRow(add_loan_btn)
         layout.addLayout(form_layout)
 
-        # جدول وام‌ها با اسکرول
         scroll_area = QScrollArea()
         self.loans_table = QTableWidget()
-        self.loans_table.setColumnCount(11)
-        self.loans_table.setHorizontalHeaderLabels(["شناسه", "نوع", "بانک", "مبلغ", "پرداخت‌شده", "سود", "شروع", "پایان", "اقساط کل", "اقساط پرداخت", "اقدامات"])
+        self.loans_table.setColumnCount(12)
+        self.loans_table.setHorizontalHeaderLabels([
+            "شناسه", "نوع", "بانک", "مبلغ", "پرداخت‌شده", "سود", 
+            "شروع", "اقساط کل", "اقساط پرداخت", "مبلغ قسط", "ویرایش", "مشاهده اقساط"
+        ])
         self.loans_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.loans_table.verticalHeader().setDefaultSectionSize(40)
+        self.loans_table.setColumnWidth(0, 50)
+        self.loans_table.setColumnWidth(1, 100)
+        self.loans_table.setColumnWidth(2, 150)
+        self.loans_table.setColumnWidth(3, 120)
+        self.loans_table.setColumnWidth(4, 120)
+        self.loans_table.setColumnWidth(5, 80)
+        self.loans_table.setColumnWidth(6, 100)
+        self.loans_table.setColumnWidth(7, 80)
+        self.loans_table.setColumnWidth(8, 100)
+        self.loans_table.setColumnWidth(9, 100)
+        self.loans_table.setColumnWidth(10, 80)
+        self.loans_table.setColumnWidth(11, 120)
         scroll_area.setWidget(self.loans_table)
         scroll_area.setWidgetResizable(True)
         scroll_area.setMinimumHeight(400)
         layout.addWidget(scroll_area)
 
-        # اضافه کردن دکمه‌های صفحه‌بندی
         self.loans_current_page = 1
         self.loans_per_page = 50
         pagination_layout = QHBoxLayout()
@@ -1907,60 +1969,85 @@ class FinanceApp(QMainWindow):
     def add_loan(self):
         loan_type = "taken" if self.loan_type.currentText() == "وام گرفته‌شده" else "given"
         bank_name = self.loan_bank.text()
-        amount = self.loan_amount.get_raw_value()
-        interest = self.loan_interest.get_raw_value()
+        total_amount = self.loan_amount.get_raw_value()
+        interest_rate = self.loan_interest.get_raw_value() or 0
         account_id = self.loan_account.currentData()
-        shamsi_start_date = self.loan_start_date.text()
-        shamsi_end_date = self.loan_end_date.text()
+        start_date = self.loan_start_date.text()
         installments_total = self.loan_installments_total.get_raw_value()
-        installments_paid = self.loan_installments_paid.get_raw_value()
-        if not amount or not shamsi_start_date or not shamsi_end_date or not installments_total or not account_id:
-            QMessageBox.warning(self, "خطا", "فیلدهای ضروری (مبلغ، تاریخ‌ها، تعداد اقساط، حساب) را پر کنید!")
+        installments_paid = self.loan_installments_paid.get_raw_value() or 0
+        installment_amount = self.loan_installment_amount.get_raw_value()
+        installment_interval = self.loan_installment_interval.get_raw_value() or 30  # پیش‌فرض 30 روز
+
+        if not bank_name:
+            QMessageBox.warning(self, "خطا", "نام بانک نمی‌تواند خالی باشد!")
             return
-        if not is_valid_shamsi_date(shamsi_start_date) or not is_valid_shamsi_date(shamsi_end_date):
+        if not total_amount:
+            QMessageBox.warning(self, "خطا", "مبلغ وام نمی‌تواند خالی باشد!")
+            return
+        if not account_id:
+            QMessageBox.warning(self, "خطا", "لطفاً حساب مرتبط را انتخاب کنید!")
+            return
+        if not installments_total:
+            QMessageBox.warning(self, "خطا", "تعداد اقساط نمی‌تواند خالی باشد!")
+            return
+        if not installment_amount:
+            QMessageBox.warning(self, "خطا", "مبلغ قسط نمی‌تواند خالی باشد!")
+            return
+        if not is_valid_shamsi_date(start_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
-        try:
-            interest = float(interest) if interest else 0.0
-            start_date = shamsi_to_gregorian(shamsi_start_date)
-            if not start_date:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                return
-            end_date = shamsi_to_gregorian(shamsi_end_date)
-            if not end_date:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                return
-            installments_total = int(installments_total)
-            installments_paid = int(installments_paid) if installments_paid else 0
-            if installments_paid > installments_total:
-                raise ValueError("تعداد اقساط پرداخت‌شده نمی‌تواند بیشتر از کل اقساط باشد!")
-            QDate.fromString(start_date, "yyyy-MM-dd")
-            QDate.fromString(end_date, "yyyy-MM-dd")
-        except ValueError as e:
-            QMessageBox.warning(self, "خطا", f"مقادیر عددی یا تاریخ‌ها نامعتبر! {str(e)}")
+        if installments_paid > installments_total:
+            QMessageBox.warning(self, "خطا", "تعداد اقساط پرداخت‌شده نمی‌تواند بیشتر از کل اقساط باشد!")
             return
-        try:
-            # بررسی وجود حساب
-            self.db_manager.execute("SELECT id FROM accounts WHERE id = ?", (account_id,))
-            if not self.db_manager.fetchone():
-                QMessageBox.warning(self, "خطا", "حساب انتخاب‌شده معتبر نیست!")
-                return
 
-            self.db_manager.execute(
-                "INSERT INTO loans (type, bank_name, total_amount, paid_amount, interest_rate, start_date, end_date, account_id, installments_total, installments_paid) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (loan_type, bank_name, amount, 0, interest, start_date, end_date, account_id, installments_total, installments_paid)
-            )
+        try:
+            date = shamsi_to_gregorian(start_date)
+            if not date:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
+            QDate.fromString(date, "yyyy-MM-dd")
+
+            # به‌روزرسانی موجودی حساب
             if loan_type == "taken":
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (total_amount, account_id))
+            else:  # given
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (total_amount, account_id))
+
+            # ثبت وام با installment_interval
+            self.db_manager.execute(
+                """
+                INSERT INTO loans (type, bank_name, total_amount, paid_amount, interest_rate, start_date, 
+                                account_id, installments_total, installments_paid, installment_amount, 
+                                installment_interval)
+                VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (loan_type, bank_name, total_amount, interest_rate, date, account_id, 
+                installments_total, installments_paid, installment_amount, installment_interval)
+            )
+            loan_id = self.db_manager.cursor.lastrowid
+
+            # تولید اقساط با حفظ روز ثابت
+            start_gregorian = datetime.strptime(date, "%Y-%m-%d")
+            start_jdate = jdatetime.date.fromgregorian(date=start_gregorian)
+            for i in range(installments_total):
+                due_jdate = start_jdate + jdatetime.timedelta(days=installment_interval * (i + 1))
+                due_date_shamsi = due_jdate.strftime("%Y/%m/%d")
+                due_date_gregorian = shamsi_to_gregorian(due_date_shamsi)
+                is_paid = 1 if i < installments_paid else 0
+                self.db_manager.execute(
+                    "INSERT INTO loan_installments (loan_id, amount, due_date, is_paid) VALUES (?, ?, ?, ?)",
+                    (loan_id, installment_amount, due_date_gregorian, is_paid)
+                )
+
             self.db_manager.commit()
             self.loan_bank.clear()
             self.loan_amount.clear()
             self.loan_interest.clear()
             self.loan_start_date.clear()
-            self.loan_end_date.clear()
             self.loan_installments_total.clear()
             self.loan_installments_paid.clear()
+            self.loan_installment_amount.clear()
+            self.loan_installment_interval.clear()
             self.load_loans()
             self.load_accounts()
             QMessageBox.information(self, "موفق", "وام با موفقیت ثبت شد!")
@@ -1970,111 +2057,155 @@ class FinanceApp(QMainWindow):
     def edit_loan(self, loan_id):
         try:
             self.db_manager.execute(
-                "SELECT type, bank_name, total_amount, interest_rate, account_id, start_date, end_date, installments_total, installments_paid "
-                "FROM loans WHERE id = ?",
+                """
+                SELECT type, bank_name, total_amount, paid_amount, interest_rate, start_date, 
+                    account_id, installments_total, installments_paid, installment_amount, 
+                    installment_interval
+                FROM loans WHERE id = ?
+                """,
                 (loan_id,)
             )
             loan = self.db_manager.fetchone()
             if not loan:
                 QMessageBox.warning(self, "خطا", "وام یافت نشد!")
                 return
-            loan_type, bank_name, total_amount, interest_rate, account_id, start_date, end_date, installments_total, installments_paid = loan
+            loan_type, bank_name, total_amount, paid_amount, interest_rate, start_date, account_id, installments_total, installments_paid, installment_amount, installment_interval = loan
 
             dialog = QDialog(self)
             dialog.setWindowTitle("ویرایش وام")
             layout = QFormLayout()
-            dialog.setLayout(layout)
-
-            edit_loan_type = QComboBox()
-            edit_loan_type.addItems(["وام گرفته‌شده", "وام داده‌شده"])
-            edit_loan_type.setCurrentText("وام گرفته‌شده" if loan_type == "taken" else "وام داده‌شده")
-
+            edit_type = QComboBox()
+            edit_type.addItems(["وام گرفته‌شده", "وام داده‌شده"])
+            edit_type.setCurrentText("وام گرفته‌شده" if loan_type == "taken" else "وام داده‌شده")
             edit_bank = QLineEdit(bank_name)
             edit_amount = NumberInput()
-            edit_amount.setText(str(total_amount))
+            edit_amount.setText(str(total_amount) if total_amount else "")
             edit_interest = NumberInput()
-            edit_interest.setText(str(interest_rate))
-
+            edit_interest.setText(str(interest_rate) if interest_rate else "")
             edit_account = QComboBox()
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
                 display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
                 edit_account.addItem(display_text, acc_id)
-            edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} تومان)" for acc_id, name, balance in accounts if acc_id == account_id][0])
-
-            edit_start_date = QLineEdit(gregorian_to_shamsi(start_date))
+            if account_id:
+                edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} تومان)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+            edit_start_date = QLineEdit(gregorian_to_shamsi(start_date) if start_date else "")
             edit_start_date.setReadOnly(True)
             edit_start_date.setPlaceholderText("1404/02/13")
             edit_start_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_start_date)
-
             edit_installments_total = NumberInput()
-            edit_installments_total.setText(str(installments_total))
+            edit_installments_total.setText(str(installments_total) if installments_total else "")
             edit_installments_paid = NumberInput()
-            edit_installments_paid.setText(str(installments_paid))
-
-            edit_end_date = QLineEdit(gregorian_to_shamsi(end_date))
-            edit_end_date.setReadOnly(True)
-            edit_end_date.setPlaceholderText("1405/02/13")
-            edit_end_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_end_date)
-
+            edit_installments_paid.setText(str(installments_paid) if installments_paid else "")
+            edit_installment_amount = NumberInput()
+            edit_installment_amount.setText(str(installment_amount) if installment_amount else "")
+            edit_installment_interval = NumberInput()
+            edit_installment_interval.setText(str(installment_interval) if installment_interval else "30")
             save_btn = QPushButton("ذخیره")
             save_btn.clicked.connect(lambda: self.save_loan(
-                loan_id, edit_loan_type.currentText(), edit_bank.text(),
-                edit_amount.get_raw_value(), edit_interest.get_raw_value(), edit_account.currentData(),
-                edit_start_date.text(), edit_end_date.text(),
-                edit_installments_total.get_raw_value(), edit_installments_paid.get_raw_value(), dialog
+                loan_id, edit_type.currentText(), edit_bank.text(), edit_amount.get_raw_value(),
+                edit_interest.get_raw_value() or 0, edit_account.currentData(), edit_start_date.text(),
+                edit_installments_total.get_raw_value(), edit_installments_paid.get_raw_value() or 0,
+                edit_installment_amount.get_raw_value(), edit_installment_interval.get_raw_value() or 30, dialog
             ))
 
-            layout.addRow("نوع وام:", edit_loan_type)
+            layout.addRow("نوع وام:", edit_type)
             layout.addRow("نام بانک:", edit_bank)
-            layout.addRow("مبلغ:", edit_amount)
+            layout.addRow("مبلغ کل:", edit_amount)
             layout.addRow("نرخ سود (%):", edit_interest)
             layout.addRow("حساب مرتبط:", edit_account)
             layout.addRow("تاریخ شروع (شمسی):", edit_start_date)
             layout.addRow("تعداد اقساط کل:", edit_installments_total)
             layout.addRow("تعداد اقساط پرداخت‌شده:", edit_installments_paid)
-            layout.addRow("تاریخ پایان (شمسی):", edit_end_date)
+            layout.addRow("مبلغ هر قسط:", edit_installment_amount)
+            layout.addRow("فاصله اقساط (روز):", edit_installment_interval)
             layout.addRow(save_btn)
-
+            dialog.setLayout(layout)
+            dialog.resize(400, 400)
             dialog.exec()
-
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def save_loan(self, loan_id, loan_type_text, bank_name, amount, interest, account_id, shamsi_start_date, shamsi_end_date, installments_total, installments_paid, dialog):
-        loan_type = "taken" if loan_type_text == "وام گرفته‌شده" else "given"
-        if not amount or not shamsi_start_date or not shamsi_end_date or not installments_total:
-            QMessageBox.warning(self, "خطا", "فیلدهای ضروری را پر کنید!")
+    def save_loan(self, loan_id, type_text, bank_name, total_amount, interest_rate, account_id, start_date, 
+              installments_total, installments_paid, installment_amount, installment_interval, dialog):
+        if not bank_name:
+            QMessageBox.warning(self, "خطا", "نام بانک نمی‌تواند خالی باشد!")
             return
-        if not is_valid_shamsi_date(shamsi_start_date) or not is_valid_shamsi_date(shamsi_end_date):
+        if not total_amount:
+            QMessageBox.warning(self, "خطا", "مبلغ وام نمی‌تواند خالی باشد!")
+            return
+        if not account_id:
+            QMessageBox.warning(self, "خطا", "لطفاً حساب مرتبط را انتخاب کنید!")
+            return
+        if not installments_total:
+            QMessageBox.warning(self, "خطا", "تعداد اقساط نمی‌تواند خالی باشد!")
+            return
+        if not installment_amount:
+            QMessageBox.warning(self, "خطا", "مبلغ قسط نمی‌تواند خالی باشد!")
+            return
+        if not is_valid_shamsi_date(start_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
-        try:
-            amount = float(amount)
-            interest = float(interest) if interest else 0.0
-            start_date = shamsi_to_gregorian(shamsi_start_date)
-            if not start_date:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                return
-            end_date = shamsi_to_gregorian(shamsi_end_date)
-            if not end_date:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                return
-            installments_total = int(installments_total)
-            installments_paid = int(installments_paid) if installments_paid else 0
-            if installments_paid > installments_total:
-                raise ValueError("تعداد اقساط پرداخت‌شده نمی‌تواند بیشتر از کل اقساط باشد!")
-            QDate.fromString(start_date, "yyyy-MM-dd")
-            QDate.fromString(end_date, "yyyy-MM-dd")
-        except ValueError as e:
-            QMessageBox.warning(self, "خطا", f"مقادیر عددی یا تاریخ‌ها نامعتبر! {str(e)}")
+        if installments_paid > installments_total:
+            QMessageBox.warning(self, "خطا", "تعداد اقساط پرداخت‌شده نمی‌تواند بیشتر از کل اقساط باشد!")
             return
+
         try:
+            date = shamsi_to_gregorian(start_date)
+            if not date:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
+            loan_type = "taken" if type_text == "وام گرفته‌شده" else "given"
+
+            # دریافت اطلاعات وام قبلی
+            self.db_manager.execute("SELECT type, total_amount, account_id FROM loans WHERE id = ?", (loan_id,))
+            old_loan = self.db_manager.fetchone()
+            if not old_loan:
+                QMessageBox.warning(self, "خطا", "وام یافت نشد!")
+                return
+            old_type, old_total_amount, old_account_id = old_loan
+
+            # بازگرداندن اثر وام قبلی بر موجودی حساب
+            if old_type == "taken":
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_total_amount, old_account_id))
+            else:
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_total_amount, old_account_id))
+
+            # اعمال اثر وام جدید
+            if loan_type == "taken":
+                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (total_amount, account_id))
+            else:
+                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (total_amount, account_id))
+
+            # به‌روزرسانی وام با installment_interval
             self.db_manager.execute(
-                "UPDATE loans SET type = ?, bank_name = ?, total_amount = ?, interest_rate = ?, account_id = ?, start_date = ?, end_date = ?, installments_total = ?, installments_paid = ? WHERE id = ?",
-                (loan_type, bank_name, amount, interest, account_id, start_date, end_date, installments_total, installments_paid, loan_id)
+                """
+                UPDATE loans SET type = ?, bank_name = ?, total_amount = ?, interest_rate = ?, 
+                                start_date = ?, account_id = ?, installments_total = ?, 
+                                installments_paid = ?, installment_amount = ?, installment_interval = ?
+                WHERE id = ?
+                """,
+                (loan_type, bank_name, total_amount, interest_rate, date, account_id, 
+                installments_total, installments_paid, installment_amount, installment_interval, loan_id)
             )
+
+            # حذف اقساط قبلی
+            self.db_manager.execute("DELETE FROM loan_installments WHERE loan_id = ?", (loan_id,))
+
+            # بازسازی اقساط
+            start_gregorian = datetime.strptime(date, "%Y-%m-%d")
+            start_jdate = jdatetime.date.fromgregorian(date=start_gregorian)
+            for i in range(installments_total):
+                due_jdate = start_jdate + jdatetime.timedelta(days=installment_interval * (i + 1))
+                due_date_shamsi = due_jdate.strftime("%Y/%m/%d")
+                due_date_gregorian = shamsi_to_gregorian(due_date_shamsi)
+                is_paid = 1 if i < installments_paid else 0
+                self.db_manager.execute(
+                    "INSERT INTO loan_installments (loan_id, amount, due_date, is_paid) VALUES (?, ?, ?, ?)",
+                    (loan_id, installment_amount, due_date_gregorian, is_paid)
+                )
+
             self.db_manager.commit()
             self.load_loans()
             self.load_accounts()
@@ -2085,54 +2216,224 @@ class FinanceApp(QMainWindow):
 
     def load_loans(self):
         try:
-            self.db_manager.execute("SELECT COUNT(*) FROM loans")
-            total_loans = self.db_manager.fetchone()[0]
-            self.loans_total_pages = (total_loans + self.loans_per_page - 1) // self.loans_per_page
-
             offset = (self.loans_current_page - 1) * self.loans_per_page
             self.db_manager.execute(
-                "SELECT l.id, l.type, l.bank_name, l.total_amount, l.paid_amount, l.interest_rate, l.start_date, l.end_date, l.installments_total, l.installments_paid "
-                "FROM loans l LEFT JOIN accounts a ON l.account_id = a.id "
-                "LIMIT ? OFFSET ?",
+                """
+                SELECT l.id, l.type, l.bank_name, l.total_amount, l.paid_amount, l.interest_rate, 
+                    l.start_date, l.account_id, l.installments_total, l.installments_paid, 
+                    l.installment_amount, l.installment_interval
+                FROM loans l
+                ORDER BY l.start_date DESC
+                LIMIT ? OFFSET ?
+                """,
                 (self.loans_per_page, offset)
             )
             loans = self.db_manager.fetchall()
+            self.loans_table.setRowCount(len(loans))
+            for row, (id, loan_type, bank_name, total_amount, paid_amount, interest_rate, start_date, 
+                    account_id, installments_total, installments_paid, installment_amount, 
+                    installment_interval) in enumerate(loans):
+                self.loans_table.setItem(row, 0, QTableWidgetItem(str(id)))
+                self.loans_table.setItem(row, 1, QTableWidgetItem("گرفته‌شده" if loan_type == "taken" else "داده‌شده"))
+                self.loans_table.setItem(row, 2, QTableWidgetItem(bank_name))
+                self.loans_table.setItem(row, 3, QTableWidgetItem(format_number(total_amount)))
+                self.loans_table.setItem(row, 4, QTableWidgetItem(format_number(paid_amount)))
+                self.loans_table.setItem(row, 5, QTableWidgetItem(str(interest_rate)))
+                self.loans_table.setItem(row, 6, QTableWidgetItem(gregorian_to_shamsi(start_date)))
+                self.loans_table.setItem(row, 7, QTableWidgetItem(str(installments_total)))
+                self.loans_table.setItem(row, 8, QTableWidgetItem(str(installments_paid)))
+                self.loans_table.setItem(row, 9, QTableWidgetItem(format_number(installment_amount) if installment_amount is not None else "0"))
+                edit_btn = QPushButton("ویرایش")
+                edit_btn.clicked.connect(lambda checked, l_id=id: self.edit_loan(l_id))
+                self.loans_table.setCellWidget(row, 10, edit_btn)
+                view_btn = QPushButton("مشاهده اقساط")
+                view_btn.clicked.connect(lambda checked, l_id=id: self.view_installments(l_id))
+                self.loans_table.setCellWidget(row, 11, view_btn)
+            self.loans_page_label.setText(f"صفحه {self.loans_current_page}")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def view_installments(self, loan_id):
+        try:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("اقساط وام")
+            layout = QVBoxLayout()
+            dialog.setLayout(layout)
+
+            table = QTableWidget()
+            table.setColumnCount(6)
+            table.setHorizontalHeaderLabels(["شناسه", "مبلغ", "سررسید", "وضعیت", "ویرایش", "تسویه"])
+            table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            table.verticalHeader().setDefaultSectionSize(40)
+            table.setColumnWidth(0, 50)
+            table.setColumnWidth(1, 120)
+            table.setColumnWidth(2, 100)
+            table.setColumnWidth(3, 100)
+            table.setColumnWidth(4, 80)
+            table.setColumnWidth(5, 80)
+
+            self.db_manager.execute(
+                "SELECT id, amount, due_date, is_paid FROM loan_installments WHERE loan_id = ? ORDER BY due_date",
+                (loan_id,)
+            )
+            installments = self.db_manager.fetchall()
+            table.setRowCount(len(installments))
+            for row, (id, amount, due_date, is_paid) in enumerate(installments):
+                table.setItem(row, 0, QTableWidgetItem(str(id)))
+                table.setItem(row, 1, QTableWidgetItem(format_number(amount)))
+                table.setItem(row, 2, QTableWidgetItem(gregorian_to_shamsi(due_date)))
+                table.setItem(row, 3, QTableWidgetItem("پرداخت‌شده" if is_paid else "پرداخت‌نشده"))
+                if not is_paid:
+                    edit_btn = QPushButton("ویرایش")
+                    edit_btn.clicked.connect(lambda checked, inst_id=id: self.edit_installment(inst_id, loan_id, dialog))
+                    table.setCellWidget(row, 4, edit_btn)
+                    settle_btn = QPushButton("تسویه")
+                    settle_btn.clicked.connect(lambda checked, inst_id=id: self.settle_installment(inst_id, loan_id, dialog))
+                    table.setCellWidget(row, 5, settle_btn)
+                else:
+                    table.setItem(row, 4, QTableWidgetItem("-"))
+                    table.setItem(row, 5, QTableWidgetItem("-"))
+
+            scroll_area = QScrollArea()
+            scroll_area.setWidget(table)
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setMinimumHeight(400)
+            layout.addWidget(scroll_area)
+            dialog.resize(600, 500)
+            dialog.exec()
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def edit_installment(self, installment_id, loan_id, parent_dialog):
+        try:
+            self.db_manager.execute(
+                "SELECT amount, due_date FROM loan_installments WHERE id = ?",
+                (installment_id,)
+            )
+            installment = self.db_manager.fetchone()
+            if not installment:
+                QMessageBox.warning(self, "خطا", "قسط یافت نشد!")
+                return
+            amount, due_date = installment
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("ویرایش قسط")
+            layout = QFormLayout()
+            edit_amount = NumberInput()
+            edit_amount.setText(str(amount))
+            edit_due_date = QLineEdit(gregorian_to_shamsi(due_date))
+            edit_due_date.setReadOnly(True)
+            edit_due_date.setPlaceholderText("1404/02/13")
+            edit_due_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_due_date)
+            save_btn = QPushButton("ذخیره")
+            save_btn.clicked.connect(lambda: self.save_installment(
+                installment_id, loan_id, edit_amount.get_raw_value(), edit_due_date.text(), dialog, parent_dialog
+            ))
+
+            layout.addRow("مبلغ قسط:", edit_amount)
+            layout.addRow("تاریخ سررسید (شمسی):", edit_due_date)
+            layout.addRow(save_btn)
+            dialog.setLayout(layout)
+            dialog.exec()
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def save_installment(self, installment_id, loan_id, amount, due_date, dialog, parent_dialog):
+        if not amount:
+            QMessageBox.warning(self, "خطا", "مبلغ قسط نمی‌تواند خالی باشد!")
             return
-        self.loans_table.setRowCount(min(len(loans), self.loans_per_page))
-        self.loans_table.setColumnWidth(0, 50)
-        self.loans_table.setColumnWidth(1, 100)
-        self.loans_table.setColumnWidth(2, 150)
-        self.loans_table.setColumnWidth(3, 100)
-        self.loans_table.setColumnWidth(4, 100)
-        self.loans_table.setColumnWidth(5, 80)
-        self.loans_table.setColumnWidth(6, 100)
-        self.loans_table.setColumnWidth(7, 100)
-        self.loans_table.setColumnWidth(8, 80)
-        self.loans_table.setColumnWidth(9, 100)
-        self.loans_table.setColumnWidth(10, 80)
+        if not is_valid_shamsi_date(due_date):
+            QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
+            return
+        try:
+            date = shamsi_to_gregorian(due_date)
+            if not date:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
+            self.db_manager.execute(
+                "UPDATE loan_installments SET amount = ?, due_date = ? WHERE id = ?",
+                (amount, date, installment_id)
+            )
+            self.db_manager.commit()
+            self.view_installments(loan_id)  # به‌روزرسانی جدول اقساط
+            dialog.accept()
+            parent_dialog.accept()  # بستن دیالوگ اصلی و باز کردن مجدد
+            self.view_installments(loan_id)  # باز کردن مجدد دیالوگ اقساط
+            QMessageBox.information(self, "موفق", "قسط با موفقیت ویرایش شد!")
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-        for row, (id, type_, bank, total, paid, interest, start, end, installments_total, installments_paid) in enumerate(loans):
-            shamsi_start = gregorian_to_shamsi(start)
-            shamsi_end = gregorian_to_shamsi(end)
-            self.loans_table.setItem(row, 0, QTableWidgetItem(str(id)))
-            self.loans_table.setItem(row, 1, QTableWidgetItem("گرفته‌شده" if type_ == "taken" else "داده‌شده"))
-            self.loans_table.setItem(row, 2, QTableWidgetItem(bank or "-"))
-            self.loans_table.setItem(row, 3, QTableWidgetItem(format_number(total)))
-            self.loans_table.setItem(row, 4, QTableWidgetItem(format_number(paid)))
-            self.loans_table.setItem(row, 5, QTableWidgetItem(f"{interest}%"))
-            self.loans_table.setItem(row, 6, QTableWidgetItem(shamsi_start))
-            self.loans_table.setItem(row, 7, QTableWidgetItem(shamsi_end))
-            self.loans_table.setItem(row, 8, QTableWidgetItem(str(installments_total)))
-            self.loans_table.setItem(row, 9, QTableWidgetItem(str(installments_paid)))
-            edit_btn = QPushButton("ویرایش")
-            edit_btn.clicked.connect(lambda checked, l_id=id: self.edit_loan(l_id))
-            self.loans_table.setCellWidget(row, 10, edit_btn)
+    def settle_installment(self, installment_id, loan_id, parent_dialog):
+        try:
+            self.db_manager.execute(
+                "SELECT amount, is_paid FROM loan_installments WHERE id = ?",
+                (installment_id,)
+            )
+            installment = self.db_manager.fetchone()
+            if not installment:
+                QMessageBox.warning(self, "خطا", "قسط یافت نشد!")
+                return
+            amount, is_paid = installment
+            if is_paid:
+                QMessageBox.warning(self, "خطا", "این قسط قبلاً تسویه شده است!")
+                return
 
-        self.loans_page_label.setText(f"صفحه {self.loans_current_page} از {self.loans_total_pages}")
-        self.loans_prev_btn.setEnabled(self.loans_current_page > 1)
-        self.loans_next_btn.setEnabled(self.loans_current_page < self.loans_total_pages)
+            dialog = QDialog(self)
+            dialog.setWindowTitle("تسویه قسط")
+            layout = QFormLayout()
+            account_combo = QComboBox()
+            self.db_manager.execute("SELECT id, name, balance FROM accounts")
+            accounts = self.db_manager.fetchall()
+            for acc_id, name, balance in accounts:
+                display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
+                account_combo.addItem(display_text, acc_id)
+            save_btn = QPushButton("تسویه")
+            save_btn.clicked.connect(lambda: self.confirm_settle_installment(
+                installment_id, loan_id, amount, account_combo.currentData(), dialog, parent_dialog
+            ))
+
+            layout.addRow("حساب برای برداشت:", account_combo)
+            layout.addRow(save_btn)
+            dialog.setLayout(layout)
+            dialog.exec()
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def confirm_settle_installment(self, installment_id, loan_id, amount, account_id, dialog, parent_dialog):
+        try:
+            # بررسی موجودی حساب
+            self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
+            balance = self.db_manager.fetchone()[0]
+            if balance < amount:
+                QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
+                return
+
+            # به‌روزرسانی موجودی حساب
+            self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
+            
+            # علامت‌گذاری قسط به‌عنوان پرداخت‌شده
+            self.db_manager.execute("UPDATE loan_installments SET is_paid = 1 WHERE id = ?", (installment_id,))
+            
+            # به‌روزرسانی تعداد اقساط پرداخت‌شده و مبلغ پرداخت‌شده وام
+            self.db_manager.execute(
+                """
+                UPDATE loans 
+                SET installments_paid = installments_paid + 1, 
+                    paid_amount = paid_amount + ?
+                WHERE id = ?
+                """,
+                (amount, loan_id)
+            )
+
+            self.db_manager.commit()
+            self.load_accounts()
+            self.load_loans()
+            dialog.accept()  # بستن دیالوگ تسویه
+            parent_dialog.accept()  # بستن دیالوگ لیست اقساط
+            self.view_installments(loan_id)  # باز کردن مجدد لیست اقساط به‌روزرسانی‌شده
+            QMessageBox.information(self, "موفق", "قسط با موفقیت تسویه شد!")
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
     def prev_loans_page(self):
         if self.loans_current_page > 1:
