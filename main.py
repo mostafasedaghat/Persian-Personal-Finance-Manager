@@ -235,6 +235,7 @@ class FinanceApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("نرم‌افزار حسابداری شخصی - حرفه‌ای")
         self.setGeometry(100, 100, 1200, 900)
+        self.setWindowIcon(QIcon("assets/icon.ico"))
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         # ایجاد نمونه از DatabaseManager
