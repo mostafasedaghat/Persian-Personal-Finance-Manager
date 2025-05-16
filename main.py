@@ -451,6 +451,7 @@ class FinanceApp(QMainWindow):
         reports_tab = self.create_reports_tab()
         persons_tab = self.create_persons_tab()
         categories_tab = self.create_categories_tab()
+        settings_tab = self.create_settings_tab()
 
         tabs.addTab(dashboard_tab, "داشبورد")
         tabs.addTab(accounts_tab, "حساب‌ها")
@@ -460,8 +461,8 @@ class FinanceApp(QMainWindow):
         tabs.addTab(reports_tab, "گزارش‌ها")
         tabs.addTab(persons_tab, "اشخاص")
         tabs.addTab(categories_tab, "دسته‌بندی‌ها")
+        tabs.addTab(settings_tab, "تنظیمات")
 
-        # فراخوانی update_dashboard هنگام تغییر تب
         tabs.currentChanged.connect(self.on_tab_changed)
 
         scroll = QScrollArea()
@@ -480,25 +481,6 @@ class FinanceApp(QMainWindow):
     def create_dashboard_tab(self):
         tab = QWidget()
         layout = QVBoxLayout()
-
-        # دکمه تغییر رمز عبور
-        change_password_btn = QPushButton("تغییر رمز عبور")
-        change_password_btn.clicked.connect(lambda: self.show_change_password_dialog("admin"))
-        change_password_btn.setStyleSheet("""
-            QPushButton {
-                font-size: 14px;
-                font-weight: bold;
-                padding: 10px;
-                background-color: #2196F3;
-                color: white;
-                border-radius: 5px;
-                max-width: 200px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-        """)
-        layout.addWidget(change_password_btn)
         
         header = QWidget()
         header_layout = QHBoxLayout()
@@ -513,7 +495,6 @@ class FinanceApp(QMainWindow):
         header.setLayout(header_layout)
         layout.addWidget(header)
 
-        # بخش بدهی‌ها و طلب‌ها
         debts_widget = QWidget()
         debts_layout = QVBoxLayout()
         debts_widget.setStyleSheet("background-color: white; border-radius: 10px; padding: 10px; margin-top: 10px;")
@@ -521,18 +502,17 @@ class FinanceApp(QMainWindow):
         debts_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
         debts_layout.addWidget(debts_label)
 
-        # جدول بدهی‌ها و طلب‌ها
         scroll_area_debts = QScrollArea()
         self.important_debts_table = QTableWidget()
         self.important_debts_table.setColumnCount(5)
         self.important_debts_table.setHorizontalHeaderLabels(["شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت"])
         self.important_debts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.important_debts_table.verticalHeader().setDefaultSectionSize(40)
-        self.important_debts_table.setColumnWidth(0, 150)  # شخص
-        self.important_debts_table.setColumnWidth(1, 100)  # مبلغ
-        self.important_debts_table.setColumnWidth(2, 100)  # پرداخت شده
-        self.important_debts_table.setColumnWidth(3, 100)  # سررسید
-        self.important_debts_table.setColumnWidth(4, 80)   # وضعیت
+        self.important_debts_table.setColumnWidth(0, 150)
+        self.important_debts_table.setColumnWidth(1, 100)
+        self.important_debts_table.setColumnWidth(2, 100)
+        self.important_debts_table.setColumnWidth(3, 100)
+        self.important_debts_table.setColumnWidth(4, 80)
         scroll_area_debts.setWidget(self.important_debts_table)
         scroll_area_debts.setWidgetResizable(True)
         scroll_area_debts.setMinimumHeight(200)
@@ -547,7 +527,6 @@ class FinanceApp(QMainWindow):
         recent_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
         recent_layout.addWidget(recent_label)
 
-        # جدول تراکنش‌های اخیر با اسکرول
         scroll_area = QScrollArea()
         self.recent_transactions_table = QTableWidget()
         self.recent_transactions_table.setColumnCount(6)
@@ -559,7 +538,6 @@ class FinanceApp(QMainWindow):
         scroll_area.setMinimumHeight(400)
         recent_layout.addWidget(scroll_area)
 
-        # اضافه کردن دکمه‌های صفحه‌بندی
         self.recent_current_page = 1
         self.recent_per_page = 50
         pagination_layout = QHBoxLayout()
@@ -1912,6 +1890,40 @@ class FinanceApp(QMainWindow):
         layout.addLayout(form_layout)
         layout.addWidget(self.categories_table)
         self.load_categories_table()  # بارگذاری اولیه جدول
+        tab.setLayout(layout)
+        return tab
+    
+    def create_settings_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout()
+        
+        # هدر تب تنظیمات
+        header = QLabel("⚙️ تنظیمات")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #333; padding: 10px;")
+        layout.addWidget(header)
+        
+        # دکمه تغییر رمز عبور
+        change_password_btn = QPushButton("تغییر رمز عبور")
+        change_password_btn.clicked.connect(lambda: self.show_change_password_dialog("admin"))
+        change_password_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                background-color: #2196F3;
+                color: white;
+                border-radius: 5px;
+                max-width: 200px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        layout.addWidget(change_password_btn)
+        
+        # فاصله‌گذاری برای ظاهر بهتر
+        layout.addStretch()
+        
         tab.setLayout(layout)
         return tab
 
