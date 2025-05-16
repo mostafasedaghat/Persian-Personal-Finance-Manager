@@ -2981,7 +2981,6 @@ class FinanceApp(QMainWindow):
         if self.debts_current_page < self.debts_total_pages:
             self.debts_current_page += 1
             self.load_debts()
-            self.debts_table.setCellWidget(row, 7, edit_btn)
 
     def add_loan(self):
         loan_type = "taken" if self.loan_type.currentText() == "وام گرفته‌شده" else "given"
