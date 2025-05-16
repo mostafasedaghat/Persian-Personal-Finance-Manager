@@ -1,4 +1,6 @@
 from database import DatabaseManager
+from login_dialog import LoginDialog
+from change_password_dialog import ChangePasswordDialog
 import sys
 import locale
 import re
@@ -22,6 +24,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import matplotlib.pyplot as plt
 from io import BytesIO
 import os
+import bcrypt
 
 # تنظیم locale برای جداکننده اعداد
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
@@ -243,13 +246,24 @@ class NumberInput(QLineEdit):
 class FinanceApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.db_manager = DatabaseManager('finance.db')
+        self.app = QApplication(sys.argv)
+        self.init_db()
+        self.show_login()
+
+
+    def show_login(self):
+        login_dialog = LoginDialog(self.db_manager)
+        if login_dialog.exec():
+            self.init_app()
+        else:
+            sys.exit()
+
+    def init_app(self):
         self.setWindowTitle("نرم‌افزار حسابداری شخصی - حرفه‌ای")
         self.setGeometry(100, 100, 1200, 900)
         self.setWindowIcon(QIcon("assets/icon.ico"))
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-
-        # ایجاد نمونه از DatabaseManager
-        self.db_manager = DatabaseManager('finance.db')
 
         # بارگذاری استایل‌ها
         with open('styles.qss', 'r', encoding='utf-8') as f:
@@ -262,6 +276,7 @@ class FinanceApp(QMainWindow):
         self.reminder_timer = QTimer(self)
         self.reminder_timer.timeout.connect(self.check_reminders)
         self.reminder_timer.start(86400000)
+        self.show()
 
     def init_db(self):
         try:
@@ -328,6 +343,11 @@ class FinanceApp(QMainWindow):
                     id INTEGER PRIMARY KEY,
                     name TEXT UNIQUE
                 );
+                CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL
+                );                    
             """)
             self.db_manager.commit()
 
@@ -403,6 +423,16 @@ class FinanceApp(QMainWindow):
                 """)
                 self.db_manager.commit()
 
+            # افزودن کاربر پیش‌فرض (admin) اگر جدول users خالی باشد
+            self.db_manager.execute("SELECT COUNT(*) FROM users")
+            if self.db_manager.fetchone()[0] == 0:
+                default_username = "admin"
+                default_password = "password".encode('utf-8')
+                password_hash = bcrypt.hashpw(default_password, bcrypt.gensalt()).decode('utf-8')
+                self.db_manager.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                                    (default_username, password_hash))
+                self.db_manager.commit()
+
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             raise
@@ -443,9 +473,32 @@ class FinanceApp(QMainWindow):
         if index == 0:  # تب داشبورد
             self.update_dashboard()
 
+    def show_change_password_dialog(self, username):
+        dialog = ChangePasswordDialog(self.db_manager, username, self)
+        dialog.exec()
+
     def create_dashboard_tab(self):
         tab = QWidget()
         layout = QVBoxLayout()
+
+        # دکمه تغییر رمز عبور
+        change_password_btn = QPushButton("تغییر رمز عبور")
+        change_password_btn.clicked.connect(lambda: self.show_change_password_dialog("admin"))
+        change_password_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                background-color: #2196F3;
+                color: white;
+                border-radius: 5px;
+                max-width: 200px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        layout.addWidget(change_password_btn)
         
         header = QWidget()
         header_layout = QHBoxLayout()
