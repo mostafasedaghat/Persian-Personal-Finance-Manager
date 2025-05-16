@@ -1190,6 +1190,8 @@ class FinanceApp(QMainWindow):
         to_account_id = self.transfer_to_account.currentData()
         amount = self.transfer_amount.get_raw_value()
         shamsi_date = self.transfer_date.text()
+
+        # بررسی ورودی‌ها
         if not amount or not shamsi_date:
             QMessageBox.warning(self, "خطا", "مبلغ و تاریخ نمی‌توانند خالی باشند!")
             return
@@ -1199,59 +1201,67 @@ class FinanceApp(QMainWindow):
         if from_account_id == to_account_id:
             QMessageBox.warning(self, "خطا", "حساب مبدأ و مقصد نمی‌توانند یکسان باشند!")
             return
+
         try:
+            # تبدیل تاریخ شمسی به میلادی
             date = shamsi_to_gregorian(shamsi_date)
             if not date:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
             QDate.fromString(date, "yyyy-MM-dd")
-        except ValueError:
-            QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
-            return
-        try:
+
             # بررسی موجودی حساب مبدأ
             self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (from_account_id,))
-            balance = self.db_manager.fetchone()[0]
-            if balance < amount:
+            balance = self.db_manager.fetchone()
+            if not balance or balance[0] < amount:
                 QMessageBox.warning(self, "خطا", "موجودی حساب مبدأ کافی نیست!")
                 return
 
-            # بررسی وجود هر دو دسته‌بندی
+            # پیدا کردن دسته‌بندی‌های انتقال
             self.db_manager.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (خروج)' AND type = 'expense'")
-            expense_result = self.db_manager.fetchone()
-            self.db_manager.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (ورود)' AND type = 'income'")
-            income_result = self.db_manager.fetchone()
-            if not expense_result or not income_result:
-                QMessageBox.critical(self, "خطا", "دسته‌بندی‌های انتقال (ورود یا خروج) یافت نشدند!")
+            expense_category_id = self.db_manager.fetchone()
+            if not expense_category_id:
+                QMessageBox.critical(self, "خطا", "دسته‌بندی 'انتقال بین حساب‌ها (خروج)' یافت نشد!")
                 return
-            expense_category_id = expense_result[0]
-            income_category_id = income_result[0]
+            expense_category_id = expense_category_id[0]
 
-            # انجام تمام عملیات در یک تراکنش
-            with self.db_manager:
-                # ثبت تراکنش خروج
-                self.db_manager.execute(
-                    "INSERT INTO transactions (account_id, category_id, amount, date, description) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (from_account_id, expense_category_id, amount, date, "انتقال به حساب دیگر")
-                )
-                # ثبت تراکنش ورود
-                self.db_manager.execute(
-                    "INSERT INTO transactions (account_id, category_id, amount, date, description) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (to_account_id, income_category_id, amount, date, "دریافت از حساب دیگر")
-                )
-                # به‌روزرسانی موجودی حساب‌ها
-                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, from_account_id))
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, to_account_id))
+            self.db_manager.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (ورود)' AND type = 'income'")
+            income_category_id = self.db_manager.fetchone()
+            if not income_category_id:
+                QMessageBox.critical(self, "خطا", "دسته‌بندی 'انتقال بین حساب‌ها (ورود)' یافت نشد!")
+                return
+            income_category_id = income_category_id[0]
 
+            # ثبت تراکنش خروج
+            self.db_manager.execute(
+                "INSERT INTO transactions (account_id, category_id, amount, date, description) VALUES (?, ?, ?, ?, ?)",
+                (from_account_id, expense_category_id, amount, date, "انتقال به حساب دیگر")
+            )
+
+            # ثبت تراکنش ورود
+            self.db_manager.execute(
+                "INSERT INTO transactions (account_id, category_id, amount, date, description) VALUES (?, ?, ?, ?, ?)",
+                (to_account_id, income_category_id, amount, date, "دریافت از حساب دیگر")
+            )
+
+            # به‌روزرسانی موجودی حساب‌ها
+            self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, from_account_id))
+            self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, to_account_id))
+
+            # کامیت تراکنش
+            self.db_manager.commit()
+
+            # پاک کردن فرم و به‌روزرسانی UI
             self.transfer_amount.clear()
             self.transfer_date.clear()
             self.load_transactions()
             self.load_accounts()
             self.update_dashboard()
             QMessageBox.information(self, "موفق", "انتقال با موفقیت انجام شد!")
+
         except sqlite3.Error as e:
+            # رول‌بک در صورت خطا
+            self.db_manager.rollback()
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
     def load_transactions(self):
