@@ -6,12 +6,22 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget,
                              QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
                              QTableWidgetItem, QLabel, QLineEdit, QComboBox,
                              QMessageBox, QFormLayout, QGridLayout, QScrollArea, 
-                             QDialog, QCheckBox, QCalendarWidget)
+                             QDialog, QCheckBox, QCalendarWidget,QSpacerItem, QSizePolicy)
 from PyQt6.QtCore import QDate, Qt, QTimer, QLocale  # اضافه کردن QLocale
-from PyQt6.QtGui import QIcon, QFont, QColor
+from PyQt6.QtGui import QIcon, QFont, QColor, QIntValidator
 import sqlite3
 import jdatetime
 from datetime import datetime, timedelta
+import pandas as pd
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import matplotlib.pyplot as plt
+from io import BytesIO
+import os
 
 # تنظیم locale برای جداکننده اعداد
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
@@ -545,7 +555,7 @@ class FinanceApp(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout()
 
-        # فرم ثبت تراکنش
+        # فرم ثبت تراکنشcreate_debts_tab
         transaction_form = QFormLayout()
         self.transaction_account = QComboBox()
         self.transaction_person = QComboBox()
@@ -557,7 +567,6 @@ class FinanceApp(QMainWindow):
         self.load_categories()
         self.transaction_amount = NumberInput()
         self.transaction_date = QLineEdit()
-        # تنظیم تاریخ پیش‌فرض به امروز
         today = datetime.now().date()
         self.transaction_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.transaction_date.setPlaceholderText("1404/02/13")
@@ -572,6 +581,7 @@ class FinanceApp(QMainWindow):
         transaction_form.addRow("دسته‌بندی:", self.transaction_category)
         transaction_form.addRow("مبلغ:", self.transaction_amount)
         transaction_form.addRow("تاریخ (شمسی):", self.transaction_date)
+        transaction_form.addRow("توضیحات:", self.transaction_desc)
         transaction_form.addRow(add_transaction_btn)
         layout.addLayout(transaction_form)
 
@@ -597,6 +607,35 @@ class FinanceApp(QMainWindow):
         transfer_form.addRow(transfer_btn)
         layout.addLayout(transfer_form)
 
+        # فرم جستجو و گزارش‌گیری
+        search_form = QFormLayout()
+        search_label = QLabel("جستجو و گزارش‌گیری تراکنش‌ها")
+        search_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        self.transaction_search_type = QComboBox()
+        self.transaction_search_type.addItems(["همه", "برداشت", "واریز", "انتقال"])
+        self.transaction_search_person = QComboBox()
+        self.transaction_search_person.addItem("-", None)
+        self.load_persons_to_combobox(self.transaction_search_person)
+        self.transaction_search_amount = NumberInput()
+        self.transaction_search_start_date = QLineEdit()
+        self.transaction_search_start_date.setPlaceholderText("1404/02/13")
+        self.transaction_search_start_date.setReadOnly(True)
+        self.transaction_search_start_date.mousePressEvent = lambda event: self.show_calendar_popup(self.transaction_search_start_date)
+        self.transaction_search_end_date = QLineEdit()
+        self.transaction_search_end_date.setPlaceholderText("1404/02/13")
+        self.transaction_search_end_date.setReadOnly(True)
+        self.transaction_search_end_date.mousePressEvent = lambda event: self.show_calendar_popup(self.transaction_search_end_date)
+        search_btn = QPushButton("نمایش گزارش")
+        search_btn.clicked.connect(self.search_transactions)
+        search_form.addRow(search_label)
+        search_form.addRow("نوع تراکنش:", self.transaction_search_type)
+        search_form.addRow("شخص:", self.transaction_search_person)
+        search_form.addRow("مبلغ:", self.transaction_search_amount)
+        search_form.addRow("از تاریخ (شمسی):", self.transaction_search_start_date)
+        search_form.addRow("تا تاریخ (شمسی):", self.transaction_search_end_date)
+        search_form.addRow(search_btn)
+        layout.addLayout(search_form)
+
         # جدول تراکنش‌ها با اسکرول
         scroll_area = QScrollArea()
         self.transactions_table = QTableWidget()
@@ -609,7 +648,7 @@ class FinanceApp(QMainWindow):
         scroll_area.setMinimumHeight(400)
         layout.addWidget(scroll_area)
 
-        # اضافه کردن دکمه‌های صفحه‌بندی
+        # صفحه‌بندی
         self.transactions_current_page = 1
         self.transactions_per_page = 50
         pagination_layout = QHBoxLayout()
@@ -630,6 +669,149 @@ class FinanceApp(QMainWindow):
         popup = PersianCalendarPopup(date_edit, self)
         popup.exec()
 
+    def load_persons_to_combobox(self, combobox):
+        try:
+            combobox.clear()
+            combobox.addItem("-", None)
+            self.db_manager.execute("SELECT id, name FROM persons")
+            persons = self.db_manager.fetchall()
+            for id, name in persons:
+                combobox.addItem(name, id)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def load_accounts_to_combobox(self, combobox):
+        try:
+            combobox.clear()
+            combobox.addItem("-", None)
+            self.db_manager.execute("SELECT id, name FROM accounts")
+            accounts = self.db_manager.fetchall()
+            for id, name in accounts:
+                combobox.addItem(name, id)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def search_transactions(self):
+        try:
+            trans_type = self.transaction_search_type.currentText()
+            person_id = self.transaction_search_person.currentData()
+            amount = self.transaction_search_amount.get_raw_value()
+            start_date = self.transaction_search_start_date.text()
+            end_date = self.transaction_search_end_date.text()
+
+            if not start_date or not end_date:
+                QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
+                return
+            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+                QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
+                return
+
+            start_date_g = shamsi_to_gregorian(start_date)
+            end_date_g = shamsi_to_gregorian(end_date)
+            if not start_date_g or not end_date_g:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
+
+            query = """
+                SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type
+                FROM transactions t
+                JOIN accounts a ON t.account_id = a.id
+                LEFT JOIN persons p ON t.person_id = p.id
+                JOIN categories c ON t.category_id = c.id
+                WHERE t.date BETWEEN ? AND ?
+            """
+            params = [start_date_g, end_date_g]
+
+            if trans_type == "برداشت":
+                query += " AND c.type = 'expense' AND c.name != 'انتقال بین حساب‌ها (خروج)'"
+            elif trans_type == "واریز":
+                query += " AND c.type = 'income' AND c.name != 'انتقال بین حساب‌ها (ورود)'"
+            elif trans_type == "انتقال":
+                query += " AND c.name IN ('انتقال بین حساب‌ها (ورود)', 'انتقال بین حساب‌ها (خروج)')"
+
+            if person_id:
+                query += " AND t.person_id = ?"
+                params.append(person_id)
+            if amount:
+                query += " AND t.amount = ?"
+                params.append(amount)
+
+            self.db_manager.execute(query, params)
+            results = self.db_manager.fetchall()
+            self.show_transaction_report(results)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def show_transaction_report(self, results):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش تراکنش‌ها")
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+
+        table = QTableWidget()
+        table.setColumnCount(8)
+        table.setHorizontalHeaderLabels(["شناسه", "تاریخ", "حساب", "شخص", "دسته‌بندی", "مبلغ", "توضیحات", "نوع"])
+        table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        table.verticalHeader().setDefaultSectionSize(40)
+
+        self.transaction_report_current_page = 1
+        self.transaction_report_per_page = 50
+        self.transaction_report_results = results
+        self.transaction_report_total_pages = (len(results) + self.transaction_report_per_page - 1) // self.transaction_report_per_page
+
+        self.update_transaction_report_table(table)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(table)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(400)
+        layout.addWidget(scroll_area)
+
+        pagination_layout = QHBoxLayout()
+        prev_btn = QPushButton("صفحه قبلی")
+        next_btn = QPushButton("صفحه بعدی")
+        page_label = QLabel(f"صفحه {self.transaction_report_current_page} از {self.transaction_report_total_pages}")
+        prev_btn.clicked.connect(lambda: self.prev_transaction_report_page(table, page_label))
+        next_btn.clicked.connect(lambda: self.next_transaction_report_page(table, page_label))
+        pagination_layout.addWidget(prev_btn)
+        pagination_layout.addWidget(page_label)
+        pagination_layout.addWidget(next_btn)
+        layout.addLayout(pagination_layout)
+
+        export_btn = QPushButton("خروجی (اکسل/CSV/PDF)")
+        export_btn.clicked.connect(lambda: self.export_report(results, "transactions"))
+        layout.addWidget(export_btn)
+
+        dialog.resize(800, 600)
+        dialog.exec()
+
+    def update_transaction_report_table(self, table):
+        start = (self.transaction_report_current_page - 1) * self.transaction_report_per_page
+        end = start + self.transaction_report_per_page
+        page_results = self.transaction_report_results[start:end]
+        table.setRowCount(len(page_results))
+        for row, (id, date, account, person, category, amount, desc, cat_type) in enumerate(page_results):
+            table.setItem(row, 0, QTableWidgetItem(str(id)))
+            table.setItem(row, 1, QTableWidgetItem(gregorian_to_shamsi(date)))
+            table.setItem(row, 2, QTableWidgetItem(account))
+            table.setItem(row, 3, QTableWidgetItem(person or "-"))
+            table.setItem(row, 4, QTableWidgetItem(category))
+            table.setItem(row, 5, QTableWidgetItem(format_number(amount)))
+            table.setItem(row, 6, QTableWidgetItem(desc or "-"))
+            table.setItem(row, 7, QTableWidgetItem("درآمد" if cat_type == "income" else "هزینه"))
+
+    def prev_transaction_report_page(self, table, page_label):
+        if self.transaction_report_current_page > 1:
+            self.transaction_report_current_page -= 1
+            self.update_transaction_report_table(table)
+            page_label.setText(f"صفحه {self.transaction_report_current_page} از {self.transaction_report_total_pages}")
+
+    def next_transaction_report_page(self, table, page_label):
+        if self.transaction_report_current_page < self.transaction_report_total_pages:
+            self.transaction_report_current_page += 1
+            self.update_transaction_report_table(table)
+            page_label.setText(f"صفحه {self.transaction_report_current_page} از {self.transaction_report_total_pages}")
+
     # اصلاح متد create_debts_tab
     def create_debts_tab(self):
         tab = QWidget()
@@ -638,9 +820,8 @@ class FinanceApp(QMainWindow):
         self.debt_person = QComboBox()
         self.debt_amount = NumberInput()
         self.debt_account = QComboBox()
-        self.debt_account.setEnabled(False)  # غیرفعال کردن پیش‌فرض
+        self.debt_account.setEnabled(False)
         self.debt_due_date = QLineEdit()
-        # تنظیم تاریخ پیش‌فرض به امروز (اختیاری)
         today = datetime.now().date()
         self.debt_due_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.debt_due_date.setPlaceholderText("1404/02/13")
@@ -648,27 +829,54 @@ class FinanceApp(QMainWindow):
         self.debt_due_date.mousePressEvent = lambda event: self.show_calendar_popup(self.debt_due_date)
         self.debt_is_credit = QComboBox()
         self.debt_is_credit.addItems(["بدهی من", "طلب من"])
-        # چک‌باکس برای "آیا پولی دریافت/پرداخت شده؟"
         self.debt_has_payment = QCheckBox("آیا پولی دریافت/پرداخت شده؟")
         self.debt_has_payment.stateChanged.connect(self.toggle_account_field)
-        # چک‌باکس برای "نمایش در داشبورد"
         self.debt_show_in_dashboard = QCheckBox("نمایش در داشبورد")
         add_debt_btn = QPushButton("ثبت بدهی/طلب")
         add_debt_btn.clicked.connect(self.add_debt)
         form_layout.addRow("شخص:", self.debt_person)
         form_layout.addRow("مبلغ:", self.debt_amount)
         form_layout.addRow("حساب مرتبط:", self.debt_account)
-        form_layout.addRow("", self.debt_has_payment)  # چک‌باکس
+        form_layout.addRow("", self.debt_has_payment)
         form_layout.addRow("تاریخ سررسید (شمسی - اختیاری):", self.debt_due_date)
         form_layout.addRow("نوع:", self.debt_is_credit)
-        form_layout.addRow("", self.debt_show_in_dashboard)  # چک‌باکس نمایش در داشبورد
+        form_layout.addRow("", self.debt_show_in_dashboard)
         form_layout.addRow(add_debt_btn)
         layout.addLayout(form_layout)
+
+        # فرم جستجو و گزارش‌گیری
+        search_form = QFormLayout()
+        search_label = QLabel("جستجو و گزارش‌گیری بدهی/طلب")
+        search_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        self.debt_search_type = QComboBox()
+        self.debt_search_type.addItems(["همه", "بدهی", "طلب"])
+        self.debt_search_person = QComboBox()
+        self.debt_search_person.addItem("-", None)
+        self.load_persons_to_combobox(self.debt_search_person)
+        self.debt_search_amount = NumberInput()
+        self.debt_search_start_date = QLineEdit()
+        self.debt_search_start_date.setPlaceholderText("1404/02/13")
+        self.debt_search_start_date.setReadOnly(True)
+        self.debt_search_start_date.mousePressEvent = lambda event: self.show_calendar_popup(self.debt_search_start_date)
+        self.debt_search_end_date = QLineEdit()
+        self.debt_search_end_date.setPlaceholderText("1404/02/13")
+        self.debt_search_end_date.setReadOnly(True)
+        self.debt_search_end_date.mousePressEvent = lambda event: self.show_calendar_popup(self.debt_search_end_date)
+        search_btn = QPushButton("نمایش گزارش")
+        search_btn.clicked.connect(self.search_debts)
+        search_form.addRow(search_label)
+        search_form.addRow("نوع:", self.debt_search_type)
+        search_form.addRow("شخص:", self.debt_search_person)
+        search_form.addRow("مبلغ:", self.debt_search_amount)
+        search_form.addRow("از تاریخ (شمسی):", self.debt_search_start_date)
+        search_form.addRow("تا تاریخ (شمسی):", self.debt_search_end_date)
+        search_form.addRow(search_btn)
+        layout.addLayout(search_form)
 
         # جدول بدهی‌ها با اسکرول
         scroll_area = QScrollArea()
         self.debts_table = QTableWidget()
-        self.debts_table.setColumnCount(10)  # اضافه کردن ستون تسویه
+        self.debts_table.setColumnCount(10)
         self.debts_table.setHorizontalHeaderLabels(["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "ویرایش", "حذف", "تسویه"])
         self.debts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.debts_table.verticalHeader().setDefaultSectionSize(40)
@@ -677,7 +885,7 @@ class FinanceApp(QMainWindow):
         scroll_area.setMinimumHeight(400)
         layout.addWidget(scroll_area)
 
-        # اضافه کردن دکمه‌های صفحه‌بندی
+        # صفحه‌بندی
         self.debts_current_page = 1
         self.debts_per_page = 50
         pagination_layout = QHBoxLayout()
@@ -777,34 +985,843 @@ class FinanceApp(QMainWindow):
         tab.setLayout(layout)
         return tab
 
+    def search_debts(self):
+        try:
+            debt_type = self.debt_search_type.currentText()
+            person_id = self.debt_search_person.currentData()
+            amount = self.debt_search_amount.get_raw_value()
+            start_date = self.debt_search_start_date.text()
+            end_date = self.debt_search_end_date.text()
+
+            if not start_date or not end_date:
+                QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
+                return
+            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+                QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
+                return
+
+            start_date_g = shamsi_to_gregorian(start_date)
+            end_date_g = shamsi_to_gregorian(end_date)
+            if not start_date_g or not end_date_g:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
+
+            query = """
+                SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, d.is_paid, COALESCE(a.name, '-'), d.is_credit
+                FROM debts d
+                JOIN persons p ON d.person_id = p.id
+                LEFT JOIN accounts a ON d.account_id = a.id
+                WHERE d.due_date BETWEEN ? AND ?
+            """
+            params = [start_date_g, end_date_g]
+
+            if debt_type == "بدهی":
+                query += " AND d.is_credit = 0"
+            elif debt_type == "طلب":
+                query += " AND d.is_credit = 1"
+
+            if person_id:
+                query += " AND d.person_id = ?"
+                params.append(person_id)
+            if amount:
+                query += " AND d.amount = ?"
+                params.append(amount)
+
+            self.db_manager.execute(query, params)
+            results = self.db_manager.fetchall()
+            self.show_debt_report(results)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def show_debt_report(self, results):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش بدهی/طلب")
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+
+        table = QTableWidget()
+        table.setColumnCount(8)
+        table.setHorizontalHeaderLabels(["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "نوع"])
+        table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        table.verticalHeader().setDefaultSectionSize(40)
+
+        self.debt_report_current_page = 1
+        self.debt_report_per_page = 50
+        self.debt_report_results = results
+        self.debt_report_total_pages = (len(results) + self.debt_report_per_page - 1) // self.debt_report_per_page
+
+        self.update_debt_report_table(table)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(table)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(400)
+        layout.addWidget(scroll_area)
+
+        pagination_layout = QHBoxLayout()
+        prev_btn = QPushButton("صفحه قبلی")
+        next_btn = QPushButton("صفحه بعدی")
+        page_label = QLabel(f"صفحه {self.debt_report_current_page} از {self.debt_report_total_pages}")
+        prev_btn.clicked.connect(lambda: self.prev_debt_report_page(table, page_label))
+        next_btn.clicked.connect(lambda: self.next_debt_report_page(table, page_label))
+        pagination_layout.addWidget(prev_btn)
+        pagination_layout.addWidget(page_label)
+        pagination_layout.addWidget(next_btn)
+        layout.addLayout(pagination_layout)
+
+        export_btn = QPushButton("خروجی (اکسل/CSV/PDF)")
+        export_btn.clicked.connect(lambda: self.export_report(results, "debts"))
+        layout.addWidget(export_btn)
+
+        dialog.resize(800, 600)
+        dialog.exec()
+
+    def update_debt_report_table(self, table):
+        start = (self.debt_report_current_page - 1) * self.debt_report_per_page
+        end = start + self.debt_report_per_page
+        page_results = self.debt_report_results[start:end]
+        table.setRowCount(len(page_results))
+        for row, (id, person, amount, paid, due_date, is_paid, account, is_credit) in enumerate(page_results):
+            table.setItem(row, 0, QTableWidgetItem(str(id)))
+            table.setItem(row, 1, QTableWidgetItem(person))
+            table.setItem(row, 2, QTableWidgetItem(format_number(amount)))
+            table.setItem(row, 3, QTableWidgetItem(format_number(paid)))
+            table.setItem(row, 4, QTableWidgetItem(gregorian_to_shamsi(due_date) if due_date else "-"))
+            table.setItem(row, 5, QTableWidgetItem("پرداخت شده" if is_paid else "در جریان"))
+            table.setItem(row, 6, QTableWidgetItem(account))
+            table.setItem(row, 7, QTableWidgetItem("طلب" if is_credit else "بدهی"))
+
+    def prev_debt_report_page(self, table, page_label):
+        if self.debt_report_current_page > 1:
+            self.debt_report_current_page -= 1
+            self.update_debt_report_table(table)
+            page_label.setText(f"صفحه {self.debt_report_current_page} از {self.debt_report_total_pages}")
+
+    def next_debt_report_page(self, table, page_label):
+        if self.debt_report_current_page < self.debt_report_total_pages:
+            self.debt_report_current_page += 1
+            self.update_debt_report_table(table)
+            page_label.setText(f"صفحه {self.debt_report_current_page} از {self.debt_report_total_pages}")
+
     def create_reports_tab(self):
         tab = QWidget()
         layout = QVBoxLayout()
-        form_layout = QFormLayout()
-        self.report_date_start = QLineEdit()
-        self.report_date_start.setPlaceholderText("1404/02/19")
-        self.report_date_start.setReadOnly(True)
-        self.report_date_start_calendar = PersianCalendarWidget(self.report_date_start)
-        self.report_date_end = QLineEdit()
-        self.report_date_end.setPlaceholderText("1404/02/19")
-        self.report_date_end.setReadOnly(True)
-        self.report_date_end_calendar = PersianCalendarWidget(self.report_date_end)
-        self.report_person = QComboBox()
-        self.report_type = QComboBox()
-        self.report_type.addItems(["تراکنش‌ها", "درآمد", "هزینه", "بدهی/طلب شخص", "بدهی/طلب کل"])
-        generate_report_btn = QPushButton("نمایش گزارش")
-        generate_report_btn.clicked.connect(self.generate_custom_report)
-        form_layout.addRow("تاریخ شروع:", self.report_date_start)
-        form_layout.addRow(self.report_date_start_calendar)
-        form_layout.addRow("تاریخ پایان:", self.report_date_end)
-        form_layout.addRow(self.report_date_end_calendar)
-        form_layout.addRow("شخص (اختیاری):", self.report_person)
-        form_layout.addRow("نوع گزارش:", self.report_type)
-        form_layout.addRow(generate_report_btn)
-        layout.addLayout(form_layout)
+
+        # دکمه‌های انواع گزارش با استایل بهبود‌یافته
+        buttons_layout = QHBoxLayout()
+        general_report_btn = QPushButton("گزارش کلی")
+        cost_income_report_btn = QPushButton("گزارش هزینه/درآمد")
+        monthly_report_btn = QPushButton("گزارش تفصیلی ماهانه")
+        person_report_btn = QPushButton("گزارش اشخاص")
+        
+        # اعمال استایل به دکمه‌ها
+        button_style = """
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                background-color: #4CAF50;
+                color: white;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """
+        general_report_btn.setStyleSheet(button_style)
+        cost_income_report_btn.setStyleSheet(button_style)
+        monthly_report_btn.setStyleSheet(button_style)
+        person_report_btn.setStyleSheet(button_style)
+        
+        general_report_btn.clicked.connect(self.show_general_report_form)
+        cost_income_report_btn.clicked.connect(self.show_cost_income_report_form)
+        monthly_report_btn.clicked.connect(self.show_monthly_report_form)
+        person_report_btn.clicked.connect(self.show_person_report_form)
+        
+        buttons_layout.addWidget(general_report_btn)
+        buttons_layout.addWidget(cost_income_report_btn)
+        buttons_layout.addWidget(monthly_report_btn)
+        buttons_layout.addWidget(person_report_btn)
+        layout.addLayout(buttons_layout)
+
+        # اضافه کردن فاصله برای جداسازی
+        layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+
         tab.setLayout(layout)
         return tab
+
+    def show_general_report_form(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش کلی")
+        layout = QFormLayout()
+        
+        self.general_start_date = QLineEdit()
+        self.general_start_date.setPlaceholderText("1404/02/13")
+        self.general_start_date.setReadOnly(True)
+        self.general_start_date_calendar = PersianCalendarWidget(self.general_start_date)
+        
+        self.general_end_date = QLineEdit()
+        self.general_end_date.setPlaceholderText("1404/02/13")
+        self.general_end_date.setReadOnly(True)
+        self.general_end_date_calendar = PersianCalendarWidget(self.general_end_date)
+        
+        generate_btn = QPushButton("نمایش گزارش")
+        generate_btn.clicked.connect(lambda: self.generate_general_report(dialog))
+        
+        layout.addRow("از تاریخ (شمسی):", self.general_start_date)
+        layout.addRow(self.general_start_date_calendar)
+        layout.addRow("تا تاریخ (شمسی):", self.general_end_date)
+        layout.addRow(self.general_end_date_calendar)
+        layout.addRow(generate_btn)
+        
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def generate_general_report(self, dialog):
+        try:
+            start_date = self.general_start_date.text()
+            end_date = self.general_end_date.text()
+
+            if not start_date or not end_date:
+                QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
+                return
+            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+                QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
+                return
+
+            start_date_g = shamsi_to_gregorian(start_date)
+            end_date_g = shamsi_to_gregorian(end_date)
+            if not start_date_g or not end_date_g:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
+
+            results = []
+            # مجموع هزینه‌ها
+            self.db_manager.execute("""
+                SELECT SUM(t.amount)
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE c.type = 'expense' AND t.date BETWEEN ? AND ?
+            """, (start_date_g, end_date_g))
+            total_cost = self.db_manager.fetchone()[0] or 0
+            results.append(["مجموع هزینه‌ها", format_number(total_cost)])
+
+            # مجموع درآمدها
+            self.db_manager.execute("""
+                SELECT SUM(t.amount)
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE c.type = 'income' AND t.date BETWEEN ? AND ?
+            """, (start_date_g, end_date_g))
+            total_income = self.db_manager.fetchone()[0] or 0
+            results.append(["مجموع درآمدها", format_number(total_income)])
+
+            # تفاوت
+            results.append(["تفاوت (درآمد - هزینه)", format_number(total_income - total_cost)])
+
+            # بستن دیالوگ پارامترها
+            dialog.accept()
+
+            # نمایش گزارش
+            self.show_general_report(results)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def show_general_report(self, results):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش کلی")
+        layout = QVBoxLayout()
+        
+        # بررسی خالی بودن داده‌ها
+        if not results:
+            QMessageBox.information(self, "بدون نتیجه", "هیچ داده‌ای برای نمایش یافت نشد.")
+            dialog.accept()
+            return
+
+        # لاگ‌گیری برای دیباگ
+        print(f"تعداد ردیف‌های گزارش کلی: {len(results)}")
+        print(f"داده‌های گزارش: {results}")
+
+        table = QTableWidget()
+        table.setColumnCount(2)
+        table.setHorizontalHeaderLabels(["معیار", "مقدار"])
+        table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        table.setRowCount(len(results))
+        table.setColumnWidth(0, 200)  # معیار
+        table.setColumnWidth(1, 200)  # مقدار
+        table.setMinimumHeight(400)
+        table.setMinimumWidth(500)
+
+        # پر کردن جدول
+        for row_idx, row_data in enumerate(results):
+            print(f"پر کردن ردیف {row_idx}: {row_data}")
+            for col_idx, value in enumerate(row_data):
+                item = QTableWidgetItem(str(value) if value is not None else "-")
+                table.setItem(row_idx, col_idx, item)
+                print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
+
+        table.resizeColumnsToContents()
+        table.resizeRowsToContents()
+        table.update()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(table)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(400)
+        layout.addWidget(scroll_area)
+
+        export_btn = QPushButton("خروجی (اکسل/CSV/PDF)")
+        export_btn.clicked.connect(lambda: self.export_report(results, "general"))
+        layout.addWidget(export_btn)
+
+        dialog.setLayout(layout)
+        dialog.resize(600, 600)
+        dialog.exec()
+
+    def show_cost_income_report_form(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش هزینه/درآمد")
+        layout = QFormLayout()
+        
+        self.cost_income_account = QComboBox()
+        self.load_accounts_to_combobox(self.cost_income_account)
+        
+        self.cost_income_type = QComboBox()
+        self.cost_income_type.addItems(["هزینه", "درآمد"])
+        
+        self.cost_income_person = QComboBox()
+        self.load_persons_to_combobox(self.cost_income_person)
+        
+        self.cost_income_start_date = QLineEdit()
+        self.cost_income_start_date.setPlaceholderText("1404/02/13")
+        self.cost_income_start_date.setReadOnly(True)
+        self.cost_income_start_date_calendar = PersianCalendarWidget(self.cost_income_start_date)
+        
+        self.cost_income_end_date = QLineEdit()
+        self.cost_income_end_date.setPlaceholderText("1404/02/13")
+        self.cost_income_end_date.setReadOnly(True)
+        self.cost_income_end_date_calendar = PersianCalendarWidget(self.cost_income_end_date)
+        
+        generate_btn = QPushButton("نمایش گزارش")
+        generate_btn.clicked.connect(lambda: self.generate_cost_income_report(dialog))
+        
+        layout.addRow("حساب:", self.cost_income_account)
+        layout.addRow("نوع:", self.cost_income_type)
+        layout.addRow("شخص:", self.cost_income_person)
+        layout.addRow("از تاریخ (شمسی):", self.cost_income_start_date)
+        layout.addRow(self.cost_income_start_date_calendar)
+        layout.addRow("تا تاریخ (شمسی):", self.cost_income_end_date)
+        layout.addRow(self.cost_income_end_date_calendar)
+        layout.addRow(generate_btn)
+        
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def load_accounts_to_combobox(self, combobox):
+        try:
+            combobox.clear()
+            combobox.addItem("-", None)
+            self.db_manager.execute("SELECT id, name FROM accounts")
+            accounts = self.db_manager.fetchall()
+            for id, name in accounts:
+                combobox.addItem(name, id)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def generate_cost_income_report(self, dialog):
+        try:
+            account_id = self.cost_income_account.currentData()
+            report_type = "expense" if self.cost_income_type.currentText() == "هزینه" else "income"
+            person_id = self.cost_income_person.currentData()
+            start_date = self.cost_income_start_date.text()
+            end_date = self.cost_income_end_date.text()
+
+            if not start_date or not end_date:
+                QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
+                return
+            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+                QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
+                return
+
+            start_date_g = shamsi_to_gregorian(start_date)
+            end_date_g = shamsi_to_gregorian(end_date)
+            if not start_date_g or not end_date_g:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
+
+            query = """
+                SELECT c.name, t.amount, t.date, a.name, p.name, t.description
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                JOIN accounts a ON t.account_id = a.id
+                LEFT JOIN persons p ON t.person_id = p.id
+                WHERE c.type = ? AND t.date BETWEEN ? AND ?
+            """
+            params = [report_type, start_date_g, end_date_g]
+            
+            if account_id:
+                query += " AND t.account_id = ?"
+                params.append(account_id)
+            if person_id:
+                query += " AND t.person_id = ?"
+                params.append(person_id)
+
+            self.db_manager.execute(query, params)
+            results = self.db_manager.fetchall()
+
+            # بستن دیالوگ پارامترها
+            dialog.accept()
+
+            # نمایش گزارش
+            self.show_cost_income_report(results)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def show_cost_income_report(self, results):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش هزینه/درآمد")
+        layout = QVBoxLayout()
+        
+        # بررسی خالی بودن داده‌ها
+        if not results:
+            QMessageBox.information(self, "بدون نتیجه", "هیچ داده‌ای برای نمایش در این بازه زمانی یافت نشد.")
+            dialog.accept()
+            return
+
+        # لاگ‌گیری برای دیباگ
+        print(f"تعداد ردیف‌های گزارش هزینه/درآمد: {len(results)}")
+        print(f"داده‌های گزارش: {results}")
+
+        table = QTableWidget()
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels(["نوع", "مبلغ", "تاریخ", "حساب", "شخص", "توضیحات"])
+        table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        table.setRowCount(len(results))  # تنظیم تعداد ردیف‌ها بر اساس داده‌ها
+        table.setColumnWidth(0, 150)  # نوع
+        table.setColumnWidth(1, 120)  # مبلغ
+        table.setColumnWidth(2, 120)  # تاریخ
+        table.setColumnWidth(3, 150)  # حساب
+        table.setColumnWidth(4, 150)  # شخص
+        table.setColumnWidth(5, 250)  # توضیحات
+        table.setMinimumHeight(400)
+        table.setMinimumWidth(800)
+
+        # پر کردن جدول
+        for row_idx, row_data in enumerate(results):
+            print(f"پر کردن ردیف {row_idx}: {row_data}")
+            for col_idx, value in enumerate(row_data):
+                item = QTableWidgetItem(str(value) if value is not None else "-")
+                table.setItem(row_idx, col_idx, item)
+                print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
+
+        table.resizeColumnsToContents()
+        table.resizeRowsToContents()
+        table.update()
+
+        # استفاده از QScrollArea
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(table)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(400)
+        layout.addWidget(scroll_area)
+
+        # دکمه خروجی
+        export_btn = QPushButton("خروجی (اکسل/CSV/PDF)")
+        export_btn.clicked.connect(lambda: self.export_report(results, "cost_income"))
+        layout.addWidget(export_btn)
+
+        dialog.setLayout(layout)
+        dialog.resize(900, 600)
+        dialog.exec() 
+        
+    def update_cost_income_report_table(self, table):
+        start = (self.cost_income_report_current_page - 1) * self.cost_income_report_per_page
+        end = start + self.cost_income_report_per_page
+        page_results = self.cost_income_report_results[start:end]
+        table.setRowCount(len(page_results))
+        for row, (category, amount, date, account, person, desc) in enumerate(page_results):
+            table.setItem(row, 0, QTableWidgetItem(category))
+            table.setItem(row, 1, QTableWidgetItem(format_number(amount)))
+            table.setItem(row, 2, QTableWidgetItem(gregorian_to_shamsi(date)))
+            table.setItem(row, 3, QTableWidgetItem(account))
+            table.setItem(row, 4, QTableWidgetItem(person or "-"))
+            table.setItem(row, 5, QTableWidgetItem(desc or "-"))
+
+    def prev_cost_income_report_page(self, table, page_label):
+        if self.cost_income_report_current_page > 1:
+            self.cost_income_report_current_page -= 1
+            self.update_cost_income_report_table(table)
+            page_label.setText(f"صفحه {self.cost_income_report_current_page} از {self.cost_income_report_total_pages}")
+
+    def next_cost_income_report_page(self, table, page_label):
+        if self.cost_income_report_current_page < self.cost_income_report_total_pages:
+            self.cost_income_report_current_page += 1
+            self.update_cost_income_report_table(table)
+            page_label.setText(f"صفحه {self.cost_income_report_current_page} از {self.cost_income_report_total_pages}")
+
+    def show_monthly_report_form(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش تفصیلی ماهانه")
+        layout = QFormLayout()
+        
+        self.monthly_year = QLineEdit()
+        self.monthly_year.setPlaceholderText("1404")
+        self.monthly_year.setValidator(QIntValidator(1300, 1500))
+        
+        generate_btn = QPushButton("نمایش گزارش")
+        generate_btn.clicked.connect(lambda: self.generate_monthly_report(dialog))
+        
+        layout.addRow("سال (شمسی):", self.monthly_year)
+        layout.addRow(generate_btn)
+        
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def generate_monthly_report(self, dialog):
+        try:
+            year = self.monthly_year.text()
+            if not year:
+                QMessageBox.warning(self, "خطا", "فیلد سال ضروری است!")
+                return
+            year = int(year)
+            if year < 1300 or year > 1500:
+                QMessageBox.warning(self, "خطا", "سال باید بین 1300 تا 1500 باشد!")
+                return
+
+            results = []
+            for month in range(1, 13):
+                start_date = f"{year}/{month:02d}/01"
+                end_date = f"{year}/{month:02d}/30"  # ساده‌سازی برای تست
+                start_date_g = shamsi_to_gregorian(start_date)
+                end_date_g = shamsi_to_gregorian(end_date)
+                
+                query = """
+                    SELECT SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as cost,
+                        SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as income,
+                        SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) -
+                        SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as diff
+                    FROM transactions t
+                    JOIN categories c ON t.category_id = c.id
+                    WHERE t.date BETWEEN ? AND ?
+                """
+                self.db_manager.execute(query, (start_date_g, end_date_g))
+                cost, income, diff = self.db_manager.fetchone() or (0, 0, 0)
+                results.append([f"{year}/{month:02d}", cost or 0, income or 0, diff or 0])
+
+            # بستن دیالوگ پارامترها
+            dialog.accept()
+
+            # نمایش گزارش
+            self.show_monthly_report(results)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def show_monthly_report(self, results):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش تفصیلی ماهانه")
+        layout = QVBoxLayout()
+        
+        # بررسی خالی بودن داده‌ها
+        if not results:
+            QMessageBox.information(self, "بدون نتیجه", "هیچ داده‌ای برای نمایش یافت نشد.")
+            dialog.accept()
+            return
+
+        # لاگ‌گیری برای دیباگ
+        print(f"تعداد ردیف‌های گزارش تفصیلی ماهانه: {len(results)}")
+        print(f"داده‌های گزارش: {results}")
+
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(["ماه", "هزینه", "درآمد", "تفاوت"])
+        table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        table.setRowCount(len(results))
+        table.setColumnWidth(0, 100)  # ماه
+        table.setColumnWidth(1, 120)  # هزینه
+        table.setColumnWidth(2, 120)  # درآمد
+        table.setColumnWidth(3, 120)  # تفاوت
+        table.setMinimumHeight(400)
+        table.setMinimumWidth(600)
+
+        # پر کردن جدول
+        for row_idx, row_data in enumerate(results):
+            print(f"پر کردن ردیف {row_idx}: {row_data}")
+            for col_idx, value in enumerate(row_data):
+                item = QTableWidgetItem(str(value) if value is not None else "-")
+                table.setItem(row_idx, col_idx, item)
+                print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
+
+        table.resizeColumnsToContents()
+        table.resizeRowsToContents()
+        table.update()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(table)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(400)
+        layout.addWidget(scroll_area)
+
+        export_btn = QPushButton("خروجی (اکسل/CSV/PDF)")
+        export_btn.clicked.connect(lambda: self.export_report(results, "monthly"))
+        layout.addWidget(export_btn)
+
+        dialog.setLayout(layout)
+        dialog.resize(700, 600)
+        dialog.exec()
+
+    def show_person_report_form(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش اشخاص")
+        layout = QFormLayout()
+        
+        self.person_report_person = QComboBox()
+        self.load_persons_to_combobox(self.person_report_person)
+        
+        self.person_report_start_date = QLineEdit()
+        self.person_report_start_date.setPlaceholderText("1404/02/13")
+        self.person_report_start_date.setReadOnly(True)
+        self.person_report_start_date_calendar = PersianCalendarWidget(self.person_report_start_date)
+        
+        self.person_report_end_date = QLineEdit()
+        self.person_report_end_date.setPlaceholderText("1404/02/13")
+        self.person_report_end_date.setReadOnly(True)
+        self.person_report_end_date_calendar = PersianCalendarWidget(self.person_report_end_date)
+        
+        generate_btn = QPushButton("نمایش گزارش")
+        generate_btn.clicked.connect(lambda: self.generate_person_report(dialog))
+        
+        layout.addRow("شخص:", self.person_report_person)
+        layout.addRow("از تاریخ (شمسی):", self.person_report_start_date)
+        layout.addRow(self.person_report_start_date_calendar)
+        layout.addRow("تا تاریخ (شمسی):", self.person_report_end_date)
+        layout.addRow(self.person_report_end_date_calendar)
+        layout.addRow(generate_btn)
+        
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def generate_person_report(self, dialog):
+        try:
+            person_id = self.person_report_person.currentData()
+            start_date = self.person_report_start_date.text()
+            end_date = self.person_report_end_date.text()
+
+            if not person_id:
+                QMessageBox.warning(self, "خطا", "لطفاً یک شخص انتخاب کنید!")
+                return
+            if not start_date or not end_date:
+                QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
+                return
+            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+                QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
+                return
+
+            start_date_g = shamsi_to_gregorian(start_date)
+            end_date_g = shamsi_to_gregorian(end_date)
+            if not start_date_g or not end_date_g:
+                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+                return
+
+            query = """
+                SELECT c.name, t.date, a.name, t.amount, t.description
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                JOIN accounts a ON t.account_id = a.id
+                WHERE t.person_id = ? AND t.date BETWEEN ? AND ?
+            """
+            self.db_manager.execute(query, (person_id, start_date_g, end_date_g))
+            results = self.db_manager.fetchall()
+
+            # بستن دیالوگ پارامترها
+            dialog.accept()
+
+            # نمایش گزارش
+            self.show_person_report(results)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def show_person_report(self, results):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("گزارش اشخاص")
+        layout = QVBoxLayout()
+        
+        # بررسی خالی بودن داده‌ها
+        if not results:
+            QMessageBox.information(self, "بدون نتیجه", "هیچ داده‌ای برای نمایش یافت نشد.")
+            dialog.accept()
+            return
+
+        # لاگ‌گیری برای دیباگ
+        print(f"تعداد ردیف‌های گزارش اشخاص: {len(results)}")
+        print(f"داده‌های گزارش: {results}")
+
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(["دسته‌بندی", "تاریخ", "حساب", "مبلغ", "توضیحات"])
+        table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        table.setRowCount(len(results))
+        table.setColumnWidth(0, 150)  # دسته‌بندی
+        table.setColumnWidth(1, 120)  # تاریخ
+        table.setColumnWidth(2, 150)  # حساب
+        table.setColumnWidth(3, 120)  # مبلغ
+        table.setColumnWidth(4, 250)  # توضیحات
+        table.setMinimumHeight(400)
+        table.setMinimumWidth(800)
+
+        # پر کردن جدول
+        for row_idx, row_data in enumerate(results):
+            print(f"پر کردن ردیف {row_idx}: {row_data}")
+            for col_idx, value in enumerate(row_data):
+                item = QTableWidgetItem(str(value) if value is not None else "-")
+                table.setItem(row_idx, col_idx, item)
+                print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
+
+        table.resizeColumnsToContents()
+        table.resizeRowsToContents()
+        table.update()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(table)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(400)
+        layout.addWidget(scroll_area)
+
+        export_btn = QPushButton("خروجی (اکسل/CSV/PDF)")
+        export_btn.clicked.connect(lambda: self.export_report(results, "person"))
+        layout.addWidget(export_btn)
+
+        dialog.setLayout(layout)
+        dialog.resize(900, 600)
+        dialog.exec()
+
+    def update_person_report_table(self, table):
+        start = (self.person_report_current_page - 1) * self.person_report_per_page
+        end = start + self.person_report_per_page
+        page_results = self.person_report_results[start:end]
+        table.setRowCount(len(page_results))
+        for row, (typ, date, account, category, amount, desc, status) in enumerate(page_results):
+            table.setItem(row, 0, QTableWidgetItem(typ))
+            table.setItem(row, 1, QTableWidgetItem(gregorian_to_shamsi(date) if date != "-" else "-"))
+            table.setItem(row, 2, QTableWidgetItem(account))
+            table.setItem(row, 3, QTableWidgetItem(category))
+            table.setItem(row, 4, QTableWidgetItem(format_number(amount) if isinstance(amount, (int, float)) else amount))
+            table.setItem(row, 5, QTableWidgetItem(desc))
+            table.setItem(row, 6, QTableWidgetItem(status))
+
+    def prev_person_report_page(self, table, page_label):
+        if self.person_report_current_page > 1:
+            self.person_report_current_page -= 1
+            self.update_person_report_table(table)
+            page_label.setText(f"صفحه {self.person_report_current_page} از {self.person_report_total_pages}")
+
+    def next_person_report_page(self, table, page_label):
+        if self.person_report_current_page < self.person_report_total_pages:
+            self.person_report_current_page += 1
+            self.update_person_report_table(table)
+            page_label.setText(f"صفحه {self.person_report_current_page} از {self.person_report_total_pages}")
     
+    def export_report(self, data, report_type):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("انتخاب نوع خروجی")
+        layout = QVBoxLayout()
+        excel_btn = QPushButton("خروجی اکسل")
+        csv_btn = QPushButton("خروجی CSV")
+        pdf_btn = QPushButton("خروجی PDF")
+        excel_btn.clicked.connect(lambda: self.generate_export(data, report_type, "excel", dialog))
+        csv_btn.clicked.connect(lambda: self.generate_export(data, report_type, "csv", dialog))
+        pdf_btn.clicked.connect(lambda: self.generate_export(data, report_type, "pdf", dialog))
+        layout.addWidget(excel_btn)
+        layout.addWidget(csv_btn)
+        layout.addWidget(pdf_btn)
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def generate_export(self, data, report_type, format_type, dialog):
+        try:
+            # تولید نام فایل با تاریخ و زمان
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_prefix = f"{report_type}_report_{timestamp}"
+
+            if report_type == "transactions":
+                df = pd.DataFrame(
+                    data,
+                    columns=["شناسه", "تاریخ", "حساب", "شخص", "دسته‌بندی", "مبلغ", "توضیحات", "نوع"]
+                )
+                df["تاریخ"] = df["تاریخ"].apply(gregorian_to_shamsi)
+                df["مبلغ"] = df["مبلغ"].apply(format_number)
+            elif report_type == "debts":
+                df = pd.DataFrame(
+                    data,
+                    columns=["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "نوع"]
+                )
+                df["سررسید"] = df["سررسید"].apply(lambda x: gregorian_to_shamsi(x) if x else "-")
+                df["مبلغ"] = df["مبلغ"].apply(format_number)
+                df["پرداخت شده"] = df["پرداخت شده"].apply(format_number)
+            elif report_type == "cost_income":
+                df = pd.DataFrame(
+                    data,
+                    columns=["نوع", "مبلغ", "تاریخ", "حساب", "شخص", "توضیحات"]
+                )
+                df["تاریخ"] = df["تاریخ"].apply(gregorian_to_shamsi)
+                df["مبلغ"] = df["مبلغ"].apply(format_number)
+            elif report_type == "monthly":
+                df = pd.DataFrame(
+                    data,
+                    columns=["ماه", "هزینه", "درآمد", "تفاوت", "اقساط پرداختی", "بدهی", "طلب"]
+                )
+                df[["هزینه", "درآمد", "تفاوت", "اقساط پرداختی", "بدهی", "طلب"]] = df[
+                    ["هزینه", "درآمد", "تفاوت", "اقساط پرداختی", "بدهی", "طلب"]
+                ].apply(lambda x: x.apply(format_number))
+            elif report_type == "person":
+                df = pd.DataFrame(
+                    data,
+                    columns=["نوع", "تاریخ", "حساب", "دسته‌بندی", "مبلغ", "توضیحات", "وضعیت"]
+                )
+                df["تاریخ"] = df["تاریخ"].apply(lambda x: gregorian_to_shamsi(x) if x != "-" else "-")
+                df["مبلغ"] = df["مبلغ"].apply(lambda x: format_number(x) if isinstance(x, (int, float)) else x)
+            elif report_type == "general":
+                df = pd.DataFrame(data, columns=["معیار", "مقدار"])
+
+            if format_type == "excel":
+                output_path = f"{file_prefix}.xlsx"
+                df.to_excel(output_path, index=False, engine='openpyxl')
+                QMessageBox.information(self, "موفق", f"فایل اکسل در {output_path} ذخیره شد!")
+            elif format_type == "csv":
+                output_path = f"{file_prefix}.csv"
+                df.to_csv(output_path, index=False, encoding='utf-8-sig')
+                QMessageBox.information(self, "موفق", f"فایل CSV در {output_path} ذخیره شد!")
+            elif format_type == "pdf":
+                output_path = f"{file_prefix}.pdf"
+                pdfmetrics.registerFont(TTFont('Vazir', 'Vazir.ttf'))
+                doc = SimpleDocTemplate(output_path, pagesize=A4)
+                elements = []
+                styles = getSampleStyleSheet()
+                persian_style = ParagraphStyle(
+                    name='Persian',
+                    parent=styles['Normal'],
+                    fontName='Vazir',
+                    fontSize=12,
+                    alignment=1,
+                    wordWrap='RTL'
+                )
+
+                table_data = [df.columns.tolist()] + df.values.tolist()
+                table = Table(table_data)
+                table.setStyle(TableStyle([
+                    ('FONT', (0, 0), (-1, -1), 'Vazir'),
+                    ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ]))
+                elements.append(table)
+                doc.build(elements)
+                QMessageBox.information(self, "موفق", f"فایل PDF در {output_path} ذخیره شد!")
+
+            dialog.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "خطا", f"خطا در تولید خروجی: {e}")
+
     def create_persons_tab(self):
         tab = QWidget()
         layout = QVBoxLayout()
@@ -852,7 +1869,6 @@ class FinanceApp(QMainWindow):
         self.load_transactions()
         self.load_debts()
         self.load_loans()
-        self.load_report_persons()  # اضافه کردن این خط
         self.update_dashboard()
 
     def load_accounts(self):

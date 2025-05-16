@@ -1,4 +1,3 @@
-pip install pyqt6 matplotlib pandas jdatetime
-
+pip install pandas openpyxl reportlab matplotlib jdatetime
 
 python main.py // 3.12.4
