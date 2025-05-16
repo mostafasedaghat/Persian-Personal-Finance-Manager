@@ -25,6 +25,9 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import os
 import bcrypt
+import dropbox
+from dropbox.exceptions import ApiError
+
 
 # تنظیم locale برای جداکننده اعداد
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
@@ -346,10 +349,18 @@ class FinanceApp(QMainWindow):
                 CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL
+                password_hash TEXT NOT NULL,
+                dropbox_token TEXT
                 );                    
             """)
             self.db_manager.commit()
+
+            # بررسی و به‌روزرسانی ستون dropbox_token
+            self.db_manager.execute("PRAGMA table_info(users)")
+            columns = [col[1] for col in self.db_manager.fetchall()]
+            if "dropbox_token" not in columns:
+                self.db_manager.execute("ALTER TABLE users ADD COLUMN dropbox_token TEXT")
+                self.db_manager.commit()
 
             # بررسی و به‌روزرسانی ستون‌های جدول debts
             self.db_manager.execute("PRAGMA table_info(debts)")
@@ -1921,11 +1932,132 @@ class FinanceApp(QMainWindow):
         """)
         layout.addWidget(change_password_btn)
         
+        # بخش تنظیم توکن Dropbox
+        token_label = QLabel("توکن دسترسی Dropbox:")
+        token_label.setStyleSheet("font-size: 14px; color: #333;")
+        layout.addWidget(token_label)
+        
+        self.dropbox_token_input = QLineEdit()
+        self.dropbox_token_input.setPlaceholderText("توکن دسترسی Dropbox را وارد کنید")
+        self.dropbox_token_input.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                font-size: 14px;
+                max-width: 400px;
+            }
+        """)
+        # بارگذاری توکن فعلی (اگر وجود داشته باشد)
+        self.db_manager.execute("SELECT dropbox_token FROM users WHERE username = ?", ("admin",))
+        result = self.db_manager.fetchone()
+        if result and result[0]:
+            self.dropbox_token_input.setText(result[0])
+        layout.addWidget(self.dropbox_token_input)
+        
+        save_token_btn = QPushButton("ذخیره توکن")
+        save_token_btn.clicked.connect(self.save_dropbox_token)
+        save_token_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                background-color: #4CAF50;
+                color: white;
+                border-radius: 5px;
+                max-width: 200px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        layout.addWidget(save_token_btn)
+        
+        # دکمه بکاپ‌گیری آنلاین به Dropbox
+        backup_btn = QPushButton("بکاپ‌گیری آنلاین")
+        backup_btn.clicked.connect(self.backup_to_dropbox)
+        backup_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                background-color: #FF9800;
+                color: white;
+                border-radius: 5px;
+                max-width: 200px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+        """)
+        layout.addWidget(backup_btn)
+        
         # فاصله‌گذاری برای ظاهر بهتر
         layout.addStretch()
         
         tab.setLayout(layout)
         return tab
+    
+    def save_dropbox_token(self):
+        from PyQt6.QtWidgets import QMessageBox
+        
+        token = self.dropbox_token_input.text().strip()
+        if not token:
+            QMessageBox.warning(self, "خطا", "توکن Dropbox نمی‌تواند خالی باشد!")
+            return
+        
+        try:
+            self.db_manager.execute("UPDATE users SET dropbox_token = ? WHERE username = ?",
+                                (token, "admin"))
+            self.db_manager.commit()
+            QMessageBox.information(self, "موفق", "توکن Dropbox با موفقیت ذخیره شد!")
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def backup_to_dropbox(self):        
+        # خواندن توکن از دیتابیس
+        try:
+            self.db_manager.execute("SELECT dropbox_token FROM users WHERE username = ?", ("admin",))
+            result = self.db_manager.fetchone()
+            if not result or not result[0]:
+                QMessageBox.warning(self, "خطا", "لطفاً ابتدا توکن Dropbox را در تنظیمات وارد کنید!")
+                return
+            DROPBOX_ACCESS_TOKEN = result[0]
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            return
+        
+        # مسیر دیتابیس و فایل بکاپ موقت
+        db_path = "finance.db"
+        backup_path = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        
+        try:
+            # ایجاد بکاپ امن با VACUUM INTO
+            conn = sqlite3.connect(db_path)
+            conn.execute(f"VACUUM INTO '{backup_path}'")
+            conn.close()
+            
+            # اتصال به Dropbox
+            dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+            
+            # مسیر فایل در Dropbox
+            dropbox_path = f"/backups/{os.path.basename(backup_path)}"
+            
+            # آپلود فایل بکاپ به Dropbox
+            with open(backup_path, "rb") as f:
+                dbx.files_upload(f.read(), dropbox_path, mute=True)
+            
+            # حذف فایل بکاپ محلی
+            os.remove(backup_path)
+            
+            QMessageBox.information(self, "موفق", "بکاپ با موفقیت در Dropbox ذخیره شد!")
+            
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای دیتابیس: {e}")
+        except ApiError as e:
+            QMessageBox.critical(self, "خطا", f"خطای Dropbox: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "خطا", f"خطای عمومی: {e}")
 
     def load_data(self):
         self.load_accounts()
