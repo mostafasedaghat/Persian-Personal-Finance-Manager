@@ -1186,6 +1186,31 @@ class FinanceApp(QMainWindow):
         buttons_layout.addWidget(person_report_btn)
         layout.addLayout(buttons_layout)
 
+        # فرم فیلترهای گزارش
+        form_layout = QFormLayout()
+        self.report_type = QComboBox()
+        self.report_type.addItems(["تراکنش‌ها", "درآمد", "هزینه", "بدهی/طلب شخص", "بدهی/طلب کل"])
+        self.report_person = QComboBox()  # تعریف self.report_person
+        self.report_person.addItem("-", None)
+        self.load_report_persons()  # بارگذاری اشخاص
+        self.report_date_start = QLineEdit()
+        self.report_date_start.setPlaceholderText("1404/02/13")
+        self.report_date_start.setReadOnly(True)
+        self.report_date_start.mousePressEvent = lambda event: self.show_calendar_popup(self.report_date_start)
+        self.report_date_end = QLineEdit()
+        self.report_date_end.setPlaceholderText("1404/02/13")
+        self.report_date_end.setReadOnly(True)
+        self.report_date_end.mousePressEvent = lambda event: self.show_calendar_popup(self.report_date_end)
+        generate_btn = QPushButton("تولید گزارش")
+        generate_btn.setStyleSheet(button_style)
+        generate_btn.clicked.connect(self.generate_custom_report)
+        form_layout.addRow("نوع گزارش:", self.report_type)
+        form_layout.addRow("شخص:", self.report_person)
+        form_layout.addRow("از تاریخ (شمسی):", self.report_date_start)
+        form_layout.addRow("تا تاریخ (شمسی):", self.report_date_end)
+        form_layout.addRow(generate_btn)
+        layout.addLayout(form_layout)
+
         # اضافه کردن فاصله برای جداسازی
         layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
