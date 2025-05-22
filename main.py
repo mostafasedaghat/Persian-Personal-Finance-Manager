@@ -316,6 +316,7 @@ class FinanceApp(QMainWindow):
                     account_id INTEGER,
                     show_in_dashboard INTEGER DEFAULT 0,
                     is_credit INTEGER DEFAULT 0,
+                    description TEXT,
                     FOREIGN KEY (person_id) REFERENCES persons(id),
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 );
@@ -369,6 +370,8 @@ class FinanceApp(QMainWindow):
                 self.db_manager.execute("ALTER TABLE debts ADD COLUMN is_credit INTEGER DEFAULT 0")
             if "show_in_dashboard" not in columns:
                 self.db_manager.execute("ALTER TABLE debts ADD COLUMN show_in_dashboard INTEGER DEFAULT 0")
+            if "description" not in columns:
+                self.db_manager.execute("ALTER TABLE debts ADD COLUMN description TEXT")
 
             # به‌روزرسانی جدول loans برای حذف end_date و افزودن installment_amount و installment_interval
             self.db_manager.execute("PRAGMA table_info(loans)")
@@ -498,7 +501,7 @@ class FinanceApp(QMainWindow):
         header.setStyleSheet("background-color: #4CAF50; border-radius: 10px; padding: 10px;")
         title_label = QLabel("📊 داشبورد مالی")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: white;")
-        self.total_balance_label = QLabel("موجودی کل: ۰ تومان")
+        self.total_balance_label = QLabel("موجودی کل: ۰ ریال")
         self.total_balance_label.setStyleSheet("font-size: 18px; color: white;")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
@@ -874,6 +877,7 @@ class FinanceApp(QMainWindow):
         self.debt_has_payment = QCheckBox("آیا پولی دریافت/پرداخت شده؟")
         self.debt_has_payment.stateChanged.connect(self.toggle_account_field)
         self.debt_show_in_dashboard = QCheckBox("نمایش در داشبورد")
+        self.debt_description = QLineEdit()
         add_debt_btn = QPushButton("ثبت بدهی/طلب")
         add_debt_btn.clicked.connect(self.add_debt)
         form_layout.addRow("شخص:", self.debt_person)
@@ -883,6 +887,7 @@ class FinanceApp(QMainWindow):
         form_layout.addRow("تاریخ سررسید (شمسی - اختیاری):", self.debt_due_date)
         form_layout.addRow("نوع:", self.debt_is_credit)
         form_layout.addRow("", self.debt_show_in_dashboard)
+        form_layout.addRow("توضیحات:", self.debt_description)
         form_layout.addRow(add_debt_btn)
         layout.addLayout(form_layout)
 
@@ -919,7 +924,7 @@ class FinanceApp(QMainWindow):
         scroll_area = QScrollArea()
         self.debts_table = QTableWidget()
         self.debts_table.setColumnCount(10)
-        self.debts_table.setHorizontalHeaderLabels(["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "ویرایش", "حذف", "تسویه"])
+        self.debts_table.setHorizontalHeaderLabels(["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "توضیحات", "ویرایش", "حذف", "تسویه"])
         self.debts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.debts_table.verticalHeader().setDefaultSectionSize(40)
         scroll_area.setWidget(self.debts_table)
@@ -1049,7 +1054,7 @@ class FinanceApp(QMainWindow):
                 return
 
             query = """
-                SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, d.is_paid, COALESCE(a.name, '-'), d.is_credit
+                SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, d.is_paid, COALESCE(a.name, '-'), d.is_credit, d.description
                 FROM debts d
                 JOIN persons p ON d.person_id = p.id
                 LEFT JOIN accounts a ON d.account_id = a.id
@@ -1082,8 +1087,8 @@ class FinanceApp(QMainWindow):
         dialog.setLayout(layout)
 
         table = QTableWidget()
-        table.setColumnCount(8)
-        table.setHorizontalHeaderLabels(["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "نوع"])
+        table.setColumnCount(9)
+        table.setHorizontalHeaderLabels(["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "نوع", "توضیحات"])
         table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         table.verticalHeader().setDefaultSectionSize(40)
 
@@ -1123,7 +1128,7 @@ class FinanceApp(QMainWindow):
         end = start + self.debt_report_per_page
         page_results = self.debt_report_results[start:end]
         table.setRowCount(len(page_results))
-        for row, (id, person, amount, paid, due_date, is_paid, account, is_credit) in enumerate(page_results):
+        for row, (id, person, amount, paid, due_date, is_paid, account, is_credit, description) in enumerate(page_results):
             table.setItem(row, 0, QTableWidgetItem(str(id)))
             table.setItem(row, 1, QTableWidgetItem(person))
             table.setItem(row, 2, QTableWidgetItem(format_number(amount)))
@@ -1132,6 +1137,7 @@ class FinanceApp(QMainWindow):
             table.setItem(row, 5, QTableWidgetItem("پرداخت شده" if is_paid else "در جریان"))
             table.setItem(row, 6, QTableWidgetItem(account))
             table.setItem(row, 7, QTableWidgetItem("طلب" if is_credit else "بدهی"))
+            table.setItem(row, 8, QTableWidgetItem(description))
 
     def prev_debt_report_page(self, table, page_label):
         if self.debt_report_current_page > 1:
@@ -2112,7 +2118,7 @@ class FinanceApp(QMainWindow):
                 edit_btn.clicked.connect(lambda checked, acc_id=id: self.edit_account(acc_id))
                 self.accounts_table.setCellWidget(row, 3, edit_btn)
                 # پر کردن لیست‌های کشویی
-                display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
+                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
                 self.transaction_account.addItem(display_text, id)
                 self.debt_account.addItem(display_text, id)
                 self.loan_account.addItem(display_text, id)
@@ -2377,9 +2383,9 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
+                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
                 edit_account.addItem(display_text, acc_id)
-            edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} تومان)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+            edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
 
             edit_person = QComboBox()
             edit_person.addItem("-", None)
@@ -2724,6 +2730,7 @@ class FinanceApp(QMainWindow):
         is_credit = self.debt_is_credit.currentText() == "طلب من"
         has_payment = self.debt_has_payment.isChecked()
         show_in_dashboard = self.debt_show_in_dashboard.isChecked()
+        description = self.debt_description.text() or None
 
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
@@ -2749,9 +2756,9 @@ class FinanceApp(QMainWindow):
             account_id_to_save = account_id if has_payment else None
 
             self.db_manager.execute(
-            "INSERT INTO debts (person_id, amount, due_date, is_paid, account_id, show_in_dashboard, is_credit) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (person_id, amount, due_date, 0, account_id_to_save, 1 if show_in_dashboard else 0, 1 if is_credit else 0)
+            "INSERT INTO debts (person_id, amount, due_date, is_paid, account_id, show_in_dashboard, is_credit, description) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (person_id, amount, due_date, 0, account_id_to_save, 1 if show_in_dashboard else 0, 1 if is_credit else 0, description)
             )
 
             # اگه تیک پرداخت فعال باشه، موجودی حساب رو به‌روزرسانی می‌کنیم
@@ -2772,6 +2779,7 @@ class FinanceApp(QMainWindow):
             self.debt_due_date.clear()
             self.debt_has_payment.setChecked(False)
             self.debt_show_in_dashboard.setChecked(False)
+            self.debt_description.clear()
             self.load_debts()
             self.load_accounts()
             QMessageBox.information(self, "موفق", "بدهی/طلب با موفقیت ثبت شد!")
@@ -2782,14 +2790,14 @@ class FinanceApp(QMainWindow):
     def edit_debt(self, debt_id):
         try:
             self.db_manager.execute(
-                "SELECT person_id, amount, account_id, due_date, is_paid, show_in_dashboard FROM debts WHERE id = ?",
+                "SELECT person_id, amount, account_id, due_date, is_paid, show_in_dashboard, description FROM debts WHERE id = ?",
                 (debt_id,)
             )
             debt = self.db_manager.fetchone()
             if not debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 return
-            person_id, amount, account_id, due_date, is_paid, show_in_dashboard = debt
+            person_id, amount, account_id, due_date, is_paid, show_in_dashboard, description = debt
 
             dialog = QDialog(self)
             dialog.setWindowTitle("ویرایش بدهی/طلب")
@@ -2810,10 +2818,10 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
+                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
                 edit_account.addItem(display_text, acc_id)
             if account_id:
-                edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} تومان)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+                edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
             edit_account.setEnabled(bool(account_id))  # فعال/غیرفعال بر اساس وجود account_id
 
             edit_has_payment = QCheckBox("آیا پولی دریافت/پرداخت شده؟")
@@ -2832,12 +2840,18 @@ class FinanceApp(QMainWindow):
             edit_show_in_dashboard = QCheckBox("نمایش در داشبورد")
             edit_show_in_dashboard.setChecked(show_in_dashboard)
 
+            edit_description = QLineEdit(description or "")
+            edit_description.setPlaceholderText("توضیحات (اختیاری)")
+            edit_description.setMaxLength(100)
+            edit_description.setToolTip("توضیحات (اختیاری)")    
+            edit_description.setStyleSheet("QLineEdit { font-family: 'Vazir'; }")
+
             save_btn = QPushButton("ذخیره")
             save_btn.clicked.connect(lambda: self.save_debt(
                 debt_id, edit_person.currentData(), edit_amount.get_raw_value(),
                 edit_account.currentData(), edit_due_date.text(),
                 edit_is_credit.currentText() == "طلب من",
-                edit_has_payment.isChecked(), edit_show_in_dashboard.isChecked(), dialog
+                edit_has_payment.isChecked(), edit_show_in_dashboard.isChecked(), edit_description.text() or None, dialog
             ))
 
             layout.addRow("شخص:", edit_person)
@@ -2847,6 +2861,7 @@ class FinanceApp(QMainWindow):
             layout.addRow("تاریخ سررسید (شمسی - اختیاری):", edit_due_date)
             layout.addRow("نوع:", edit_is_credit)
             layout.addRow("", edit_show_in_dashboard)
+            layout.addRow("توضیحات", edit_description)
             layout.addRow(save_btn)
 
             dialog.exec()
@@ -2854,7 +2869,7 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def save_debt(self, debt_id, person_id, amount, account_id, shamsi_due_date, is_credit, has_payment, show_in_dashboard, dialog):
+    def save_debt(self, debt_id, person_id, amount, account_id, shamsi_due_date, is_credit, has_payment, show_in_dashboard, description, dialog):
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
             return
@@ -2904,8 +2919,8 @@ class FinanceApp(QMainWindow):
 
             # ذخیره در دیتابیس
             self.db_manager.execute(
-                "UPDATE debts SET person_id = ?, amount = ?, account_id = ?, due_date = ?, is_paid = 0, show_in_dashboard = ? WHERE id = ?",
-                (person_id, amount, account_id_to_save, due_date, 1 if show_in_dashboard else 0, debt_id)
+                "UPDATE debts SET person_id = ?, amount = ?, account_id = ?, due_date = ?, is_paid = 0, show_in_dashboard = ?, description = ? WHERE id = ?",
+                (person_id, amount, account_id_to_save, due_date, 1 if show_in_dashboard else 0, description, debt_id)
             )
             self.db_manager.commit()
             self.load_debts()
@@ -2925,7 +2940,7 @@ class FinanceApp(QMainWindow):
 
             offset = (self.debts_current_page - 1) * self.debts_per_page
             self.db_manager.execute(
-                "SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, d.is_paid, COALESCE(a.name, '-'), d.is_credit "
+                "SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, d.is_paid, COALESCE(a.name, '-'), d.is_credit, d.description "
                 "FROM debts d JOIN persons p ON d.person_id = p.id LEFT JOIN accounts a ON d.account_id = a.id "
                 "LIMIT ? OFFSET ?",
                 (self.debts_per_page, offset)
@@ -2937,6 +2952,11 @@ class FinanceApp(QMainWindow):
         
          # پاک‌سازی کامل جدول
         self.debts_table.clear()
+        self.debts_table.setColumnCount(11)
+        self.debts_table.setHorizontalHeaderLabels([
+            "شناسه", "نام", "مبلغ کل", "مبلغ پرداختی", "سررسید",
+            "وضعیت", "حساب", "توضیحات", "ویرایش", "حذف", "تسویه"
+        ])
         self.debts_table.setRowCount(0)
         self.debts_table.setRowCount(min(len(debts), self.debts_per_page))
         # تنظیم عرض ستون‌ها
@@ -2947,11 +2967,12 @@ class FinanceApp(QMainWindow):
         self.debts_table.setColumnWidth(4, 100)
         self.debts_table.setColumnWidth(5, 80)
         self.debts_table.setColumnWidth(6, 120)
-        self.debts_table.setColumnWidth(7, 80)
-        self.debts_table.setColumnWidth(8, 80)  # ستون حذف
-        self.debts_table.setColumnWidth(9, 80)  # ستون تسویه
+        self.debts_table.setColumnWidth(7, 200)
+        self.debts_table.setColumnWidth(8, 80)
+        self.debts_table.setColumnWidth(9, 80)  # ستون حذف
+        self.debts_table.setColumnWidth(10, 80)  # ستون تسویه
 
-        for row, (id, person, amount, paid, due_date, is_paid, account, is_credit) in enumerate(debts):
+        for row, (id, person, amount, paid, due_date, is_paid, account, is_credit, description) in enumerate(debts):
             shamsi_due_date = gregorian_to_shamsi(due_date) if due_date else "-"
             self.debts_table.setItem(row, 0, QTableWidgetItem(str(id)))
             self.debts_table.setItem(row, 1, QTableWidgetItem(person))
@@ -2960,6 +2981,7 @@ class FinanceApp(QMainWindow):
             self.debts_table.setItem(row, 4, QTableWidgetItem(shamsi_due_date))
             self.debts_table.setItem(row, 5, QTableWidgetItem("پرداخت شده" if is_paid else "در جریان"))
             self.debts_table.setItem(row, 6, QTableWidgetItem(account))
+            self.debts_table.setItem(row, 7, QTableWidgetItem(description or ""))
 
             # چاپ برای دیباگ
             #print(f"Debt ID: {id}, Amount: {amount}, Paid: {paid}, Is Paid: {is_paid}, Remaining: {amount - paid}")
@@ -2981,25 +3003,25 @@ class FinanceApp(QMainWindow):
                 #print(f"Debt ID: {id} - Showing buttons (is_paid = 0)")
                 edit_btn = QPushButton("ویرایش")
                 edit_btn.clicked.connect(lambda checked, d_id=id: self.edit_debt(d_id))
-                self.debts_table.setCellWidget(row, 7, edit_btn)
+                self.debts_table.setCellWidget(row, 8, edit_btn)
 
                 delete_btn = QPushButton("حذف")
                 delete_btn.clicked.connect(lambda checked, d_id=id: self.delete_debt(d_id))
-                self.debts_table.setCellWidget(row, 8, delete_btn)
+                self.debts_table.setCellWidget(row, 9, delete_btn)
 
                 settle_btn = QPushButton("تسویه")
                 settle_btn.clicked.connect(lambda checked, d_id=id: self.settle_debt(d_id))
-                self.debts_table.setCellWidget(row, 9, settle_btn)
+                self.debts_table.setCellWidget(row, 10, settle_btn)
             else:
                 #print(f"Debt ID: {id} - Showing dashes (is_paid = 1)")
                 # پاک کردن ویجت‌های قبلی
-                self.debts_table.removeCellWidget(row, 7)
                 self.debts_table.removeCellWidget(row, 8)
                 self.debts_table.removeCellWidget(row, 9)
+                self.debts_table.removeCellWidget(row, 10)
                 # تنظیم خط تیره
-                self.debts_table.setItem(row, 7, QTableWidgetItem("-"))
                 self.debts_table.setItem(row, 8, QTableWidgetItem("-"))
                 self.debts_table.setItem(row, 9, QTableWidgetItem("-"))
+                self.debts_table.setItem(row, 10, QTableWidgetItem("-"))
 
         self.debts_page_label.setText(f"صفحه {self.debts_current_page} از {self.debts_total_pages}")
         self.debts_prev_btn.setEnabled(self.debts_current_page > 1)
@@ -3042,10 +3064,10 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
+                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
                 settle_account.addItem(display_text, acc_id)
             if account_id:  # اگه قبلاً حسابی انتخاب شده بود، اون رو پیش‌فرض قرار بده
-                settle_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} تومان)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+                settle_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
             layout.addRow("حساب مرتبط:", settle_account)
 
             # دکمه تأیید
@@ -3111,7 +3133,7 @@ class FinanceApp(QMainWindow):
             self.load_accounts()
             self.update_dashboard()
             dialog.accept()
-            QMessageBox.information(self, "موفق", f"پرداخت به مبلغ {format_number(payment_amount)} تومان ثبت شد!")
+            QMessageBox.information(self, "موفق", f"پرداخت به مبلغ {format_number(payment_amount)} ریال ثبت شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
@@ -3324,10 +3346,10 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
+                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
                 edit_account.addItem(display_text, acc_id)
             if account_id:
-                edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} تومان)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+                edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
             edit_start_date = QLineEdit(gregorian_to_shamsi(start_date) if start_date else "")
             edit_start_date.setReadOnly(True)
             edit_start_date.setPlaceholderText("1404/02/13")
@@ -3623,7 +3645,7 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} تومان)"
+                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
                 account_combo.addItem(display_text, acc_id)
             save_btn = QPushButton("تسویه")
             save_btn.clicked.connect(lambda: self.confirm_settle_installment(
@@ -3835,7 +3857,7 @@ class FinanceApp(QMainWindow):
             # به‌روزرسانی موجودی کل
             self.db_manager.execute("SELECT SUM(balance) FROM accounts")
             total_balance = self.db_manager.fetchone()[0] or 0
-            self.total_balance_label.setText(f"موجودی کل: {format_number(total_balance)} تومان")
+            self.total_balance_label.setText(f"موجودی کل: {format_number(total_balance)} ریال")
 
             # بارگذاری بدهی‌ها و طلب‌های مهم
             today = jdatetime.date.today()
@@ -3870,7 +3892,7 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, amount, due_date FROM debts WHERE is_paid = 0 AND due_date IS NOT NULL AND due_date <= ?", (today,))
             debts = self.db_manager.fetchall()
             for debt in debts:
-                QMessageBox.warning(self, "یادآوری", f"بدهی به مبلغ {format_number(debt[1])} تومان تا {gregorian_to_shamsi(debt[2])} سررسید شده!")
+                QMessageBox.warning(self, "یادآوری", f"بدهی به مبلغ {format_number(debt[1])} ریال تا {gregorian_to_shamsi(debt[2])} سررسید شده!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
