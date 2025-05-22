@@ -80,6 +80,22 @@ To run the program, you need Python and the following libraries installed:
 
 ---
 
+## نام کاربری و رمز عبور پیش‌فرض / Default Username and Password
+
+**فارسی**  
+برای ورود به برنامه در اولین اجرا، از اطلاعات زیر استفاده کنید:  
+- **نام کاربری**: `admin`  
+- **رمز عبور**: `password`  
+*توصیه می‌شود پس از ورود، رمز عبور را تغییر دهید.*
+
+**English**  
+To log in to the application for the first time, use the following credentials:  
+- **Username**: `admin`  
+- **Password**: `password`  
+*It is recommended to change the password after logging in.*
+
+---
+
 ## ساخت خروجی برای ویندوز / Building Executable for Windows
 
 **فارسی**  
