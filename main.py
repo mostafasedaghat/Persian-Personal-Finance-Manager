@@ -509,6 +509,64 @@ class FinanceApp(QMainWindow):
         header.setLayout(header_layout)
         layout.addWidget(header)
 
+        # بخش جدید: آمار ماه جاری
+        stats_widget = QWidget()
+        stats_layout = QHBoxLayout()
+        stats_widget.setStyleSheet("background-color: white; border-radius: 10px; padding: 10px; margin-top: 10px;")
+
+        # ستون 1: جمع هزینه‌ها
+        expenses_column = QVBoxLayout()
+        expenses_label = QLabel("جمع هزینه در ماه جاری")
+        expenses_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+        self.expenses_value = QLabel("۰ ریال")
+        self.expenses_value.setStyleSheet("font-size: 16px; color: red;")
+        expenses_column.addWidget(expenses_label)
+        expenses_column.addWidget(self.expenses_value)
+        stats_layout.addLayout(expenses_column)
+
+        # ستون 2: جمع درآمد‌ها
+        income_column = QVBoxLayout()
+        income_label = QLabel("جمع درآمد در ماه جاری")
+        income_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+        self.income_value = QLabel("۰ ریال")
+        self.income_value.setStyleSheet("font-size: 16px; color: #333;")
+        income_column.addWidget(income_label)
+        income_column.addWidget(self.income_value)
+        stats_layout.addLayout(income_column)
+
+        # ستون 3: اختلاف هزینه و درآمد
+        balance_column = QVBoxLayout()
+        balance_label = QLabel("اختلاف هزینه و درآمد ماه جاری")
+        balance_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+        self.balance_value = QLabel("۰ ریال")
+        self.balance_value.setStyleSheet("font-size: 16px; color: #333;")
+        balance_column.addWidget(balance_label)
+        balance_column.addWidget(self.balance_value)
+        stats_layout.addLayout(balance_column)
+
+        # ستون 4: جمع طلب‌ها
+        credits_column = QVBoxLayout()
+        credits_label = QLabel("جمع طلب‌های ماه جاری")
+        credits_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+        self.credits_value = QLabel("۰ ریال")
+        self.credits_value.setStyleSheet("font-size: 16px; color: #333;")
+        credits_column.addWidget(credits_label)
+        credits_column.addWidget(self.credits_value)
+        stats_layout.addLayout(credits_column)
+
+        # ستون 5: جمع بدهی‌ها
+        debts_column = QVBoxLayout()
+        debts_label = QLabel("جمع بدهی‌های ماه جاری")
+        debts_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+        self.debts_value = QLabel("۰ ریال")
+        self.debts_value.setStyleSheet("font-size: 16px; color: red;")
+        debts_column.addWidget(debts_label)
+        debts_column.addWidget(self.debts_value)
+        stats_layout.addLayout(debts_column)
+
+        stats_widget.setLayout(stats_layout)
+        layout.addWidget(stats_widget)
+
         debts_widget = QWidget()
         debts_layout = QVBoxLayout()
         debts_widget.setStyleSheet("background-color: white; border-radius: 10px; padding: 10px; margin-top: 10px;")
@@ -3874,6 +3932,13 @@ class FinanceApp(QMainWindow):
             )
             debts = self.db_manager.fetchall()
 
+            # دیباگ: چاپ نوع و مقدار debts
+            #print(f"Type of debts: {type(debts)}, Value: {debts}")
+            # مطمئن شدن از اینکه debts یه لیست یا تاپل هست
+            if not isinstance(debts, (list, tuple)):
+                #print(f"Error: Expected a list for debts, got {type(debts)}")
+                debts = []
+
             self.important_debts_table.setRowCount(len(debts))
             for row, (id, person, amount, paid, due_date, is_paid, account) in enumerate(debts):
                 shamsi_due_date = gregorian_to_shamsi(due_date) if due_date else "-"
@@ -3883,8 +3948,122 @@ class FinanceApp(QMainWindow):
                 self.important_debts_table.setItem(row, 3, QTableWidgetItem(shamsi_due_date))
                 self.important_debts_table.setItem(row, 4, QTableWidgetItem("پرداخت شده" if is_paid else "در جریان"))
 
+            # آپدیت آمار ماه جاری
+            expenses = self.get_current_month_expenses()
+            income = self.get_current_month_income()
+            balance = self.get_current_month_balance()
+            credits = self.get_current_month_credits()
+            debts_value = self.get_current_month_debts()
+            
+            self.expenses_value.setText(f"{format_number(expenses)} ریال")
+            self.income_value.setText(f"{format_number(income)} ریال")
+            self.balance_value.setText(f"{format_number(balance)} ریال")
+            self.credits_value.setText(f"{format_number(credits)} ریال")
+            self.debts_value.setText(f"{format_number(debts_value)} ریال")
+
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+
+    def get_current_month_expenses(self):
+        today = jdatetime.date.today()
+        start_of_month = jdatetime.date(today.year, today.month, 1).togregorian()
+        next_month = today.month + 1 if today.month < 12 else 1
+        next_year = today.year + 1 if today.month == 12 else today.year
+        end_of_month = (jdatetime.date(next_year, next_month, 1) - jdatetime.timedelta(days=1)).togregorian()
+        self.db_manager.execute(
+            """
+            SELECT COALESCE(SUM(t.amount), 0)
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE c.type = 'expense' AND t.date BETWEEN ? AND ?
+            """,
+            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
+        )
+        return self.db_manager.fetchone()[0]
+
+    def get_current_month_income(self):
+        today = jdatetime.date.today()
+        start_of_month = jdatetime.date(today.year, today.month, 1).togregorian()
+        next_month = today.month + 1 if today.month < 12 else 1
+        next_year = today.year + 1 if today.month == 12 else today.year
+        end_of_month = (jdatetime.date(next_year, next_month, 1) - jdatetime.timedelta(days=1)).togregorian()
+        self.db_manager.execute(
+            """
+            SELECT COALESCE(SUM(t.amount), 0)
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE c.type = 'income' AND t.date BETWEEN ? AND ?
+            """,
+            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
+        )
+        return self.db_manager.fetchone()[0]
+
+    def get_current_month_balance(self):
+        income = self.get_current_month_income()
+        expenses = self.get_current_month_expenses()
+        return income - expenses
+
+    def get_current_month_credits(self):
+        today = jdatetime.date.today()
+        start_of_month = jdatetime.date(today.year, today.month, 1).togregorian()
+        next_month = today.month + 1 if today.month < 12 else 1
+        next_year = today.year + 1 if today.month == 12 else today.year
+        end_of_month = (jdatetime.date(next_year, next_month, 1) - jdatetime.timedelta(days=1)).togregorian()
+        self.db_manager.execute(
+            """
+            SELECT COALESCE(SUM(amount - paid_amount), 0)
+            FROM debts
+            WHERE is_credit = 1 AND is_paid = 0 AND due_date BETWEEN ? AND ?
+            """,
+            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
+        )
+        return self.db_manager.fetchone()[0]
+
+    def get_current_month_debts(self):
+        today = jdatetime.date.today()
+        start_of_month = jdatetime.date(today.year, today.month, 1).togregorian()
+        next_month = today.month + 1 if today.month < 12 else 1
+        next_year = today.year + 1 if today.month == 12 else today.year
+        end_of_month = (jdatetime.date(next_year, next_month, 1) - jdatetime.timedelta(days=1)).togregorian()
+        
+        # دیباگ: چاپ بازه تاریخ
+        #print(f"get_current_month_debts: start_of_month = {start_of_month.strftime('%Y-%m-%d')}, end_of_month = {end_of_month.strftime('%Y-%m-%d')}")
+        
+        # دیباگ: چک کردن تعداد بدهی‌های پرداخت‌نشده
+        self.db_manager.execute(
+            """
+            SELECT COUNT(*)
+            FROM debts
+            WHERE is_credit = 0 AND is_paid = 0
+            """
+        )
+        debt_count = self.db_manager.fetchone()[0]
+        #print(f"get_current_month_debts: Total unpaid debts (is_credit = 0) = {debt_count}")
+        
+        # دیباگ: چک کردن بدهی‌هایی که due_date در بازه ماه جاری دارن
+        self.db_manager.execute(
+            """
+            SELECT COUNT(*)
+            FROM debts
+            WHERE is_credit = 0 AND is_paid = 0 AND due_date BETWEEN ? AND ?
+            """,
+            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
+        )
+        matching_debt_count = self.db_manager.fetchone()[0]
+        #print(f"get_current_month_debts: Unpaid debts in current month = {matching_debt_count}")
+        
+        # کوئری اصلی
+        self.db_manager.execute(
+            """
+            SELECT COALESCE(SUM(amount - paid_amount), 0)
+            FROM debts
+            WHERE is_credit = 0 AND is_paid = 0 AND due_date BETWEEN ? AND ?
+            """,
+            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
+        )
+        result = self.db_manager.fetchone()[0]
+        #print(f"get_current_month_debts: Sum of unpaid debts = {result}")
+        return result
 
     def check_reminders(self):
         today = jdatetime.date.today().togregorian().strftime("%Y-%m-%d")
