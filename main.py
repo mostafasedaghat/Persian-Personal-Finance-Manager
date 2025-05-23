@@ -1370,8 +1370,8 @@ class FinanceApp(QMainWindow):
             return
 
         # لاگ‌گیری برای دیباگ
-        print(f"تعداد ردیف‌های گزارش کلی: {len(results)}")
-        print(f"داده‌های گزارش: {results}")
+        #print(f"تعداد ردیف‌های گزارش کلی: {len(results)}")
+        #print(f"داده‌های گزارش: {results}")
 
         table = QTableWidget()
         table.setColumnCount(2)
@@ -1385,11 +1385,11 @@ class FinanceApp(QMainWindow):
 
         # پر کردن جدول
         for row_idx, row_data in enumerate(results):
-            print(f"پر کردن ردیف {row_idx}: {row_data}")
+            #print(f"پر کردن ردیف {row_idx}: {row_data}")
             for col_idx, value in enumerate(row_data):
                 item = QTableWidgetItem(str(value) if value is not None else "-")
                 table.setItem(row_idx, col_idx, item)
-                print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
+                #print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
 
         table.resizeColumnsToContents()
         table.resizeRowsToContents()
@@ -1520,8 +1520,8 @@ class FinanceApp(QMainWindow):
             return
 
         # لاگ‌گیری برای دیباگ
-        print(f"تعداد ردیف‌های گزارش هزینه/درآمد: {len(results)}")
-        print(f"داده‌های گزارش: {results}")
+        #print(f"تعداد ردیف‌های گزارش هزینه/درآمد: {len(results)}")
+        #print(f"داده‌های گزارش: {results}")
 
         table = QTableWidget()
         table.setColumnCount(6)
@@ -1539,11 +1539,11 @@ class FinanceApp(QMainWindow):
 
         # پر کردن جدول
         for row_idx, row_data in enumerate(results):
-            print(f"پر کردن ردیف {row_idx}: {row_data}")
+            #print(f"پر کردن ردیف {row_idx}: {row_data}")
             for col_idx, value in enumerate(row_data):
                 item = QTableWidgetItem(str(value) if value is not None else "-")
                 table.setItem(row_idx, col_idx, item)
-                print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
+                #print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
 
         table.resizeColumnsToContents()
         table.resizeRowsToContents()
@@ -1659,8 +1659,8 @@ class FinanceApp(QMainWindow):
             return
 
         # لاگ‌گیری برای دیباگ
-        print(f"تعداد ردیف‌های گزارش تفصیلی ماهانه: {len(results)}")
-        print(f"داده‌های گزارش: {results}")
+        #print(f"تعداد ردیف‌های گزارش تفصیلی ماهانه: {len(results)}")
+        #print(f"داده‌های گزارش: {results}")
 
         table = QTableWidget()
         table.setColumnCount(4)
@@ -1676,11 +1676,11 @@ class FinanceApp(QMainWindow):
 
         # پر کردن جدول
         for row_idx, row_data in enumerate(results):
-            print(f"پر کردن ردیف {row_idx}: {row_data}")
+            #print(f"پر کردن ردیف {row_idx}: {row_data}")
             for col_idx, value in enumerate(row_data):
                 item = QTableWidgetItem(str(value) if value is not None else "-")
                 table.setItem(row_idx, col_idx, item)
-                print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
+                #print(f"تنظیم آیتم در ردیف {row_idx}، ستون {col_idx}: {item.text()}")
 
         table.resizeColumnsToContents()
         table.resizeRowsToContents()
@@ -1783,8 +1783,8 @@ class FinanceApp(QMainWindow):
             return
 
         # لاگ‌گیری برای دیباگ
-        print(f"تعداد ردیف‌های گزارش اشخاص: {len(results)}")
-        print(f"داده‌های گزارش: {results}")
+        #print(f"تعداد ردیف‌های گزارش اشخاص: {len(results)}")
+        #print(f"داده‌های گزارش: {results}")
 
         table = QTableWidget()
         table.setColumnCount(5)
@@ -1801,7 +1801,7 @@ class FinanceApp(QMainWindow):
 
         # پر کردن جدول
         for row_idx, row_data in enumerate(results):
-            print(f"پر کردن ردیف {row_idx}: {row_data}")
+            #print(f"پر کردن ردیف {row_idx}: {row_data}")
             for col_idx, value in enumerate(row_data):
                 item = QTableWidgetItem(str(value) if value is not None else "-")
                 table.setItem(row_idx, col_idx, item)
