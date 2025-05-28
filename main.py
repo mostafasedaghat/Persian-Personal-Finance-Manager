@@ -434,8 +434,17 @@ class FinanceApp(QMainWindow):
                     ('تفریح', 'expense'), ('خرید', 'expense'), ('سلامتی', 'expense'),
                     ('سایر هزینه‌ها', 'expense'),
                     ('انتقال بین حساب‌ها (خروج)', 'expense'), ('انتقال بین حساب‌ها (ورود)', 'income');
+                    ('تسویه طلب', 'income'),  -- اضافه شدن این خط
+                    ('تسویه بدهی', 'expense'); -- اضافه شدن این خط                                              
                 """)
                 self.db_manager.commit()
+            else: # اگر دسته بندی‌ها از قبل وجود دارند، مطمئن می شویم دسته بندی های جدید اضافه شده باشند
+                self.db_manager.executescript("""
+                    INSERT OR IGNORE INTO categories (name, type) VALUES
+                    ('تسویه طلب', 'income'),
+                    ('تسویه بدهی', 'expense');
+                """)
+                self.db_manager.commit()    
 
             # افزودن کاربر پیش‌فرض (admin) اگر جدول users خالی باشد
             self.db_manager.execute("SELECT COUNT(*) FROM users")
@@ -3274,33 +3283,72 @@ class FinanceApp(QMainWindow):
             dialog.setLayout(layout)
 
             # نوع بدهی/طلب
-            type_label = QLabel("طلب من" if is_credit else "بدهی من")
+            type_label_text = "طلب من (دریافت پول)" if is_credit else "بدهی من (پرداخت پول)"
+            type_label = QLabel(type_label_text)
             layout.addRow("نوع:", type_label)
 
             # مبلغ باقی‌مانده
             remaining_label = QLabel(format_number(remaining_amount))
             layout.addRow("مبلغ باقی‌مانده:", remaining_label)
 
+            # چک‌باکس جدید
+            self.settle_has_payment_checkbox = QCheckBox("انتقال وجه انجام می‌شود؟")
+            # به صورت پیش‌فرض، اگر قبلاً حساب مرتبطی برای این بدهی ثبت شده بود، فعال باشد
+            self.settle_has_payment_checkbox.setChecked(account_id is not None) 
+            layout.addRow("", self.settle_has_payment_checkbox)
+
             # ورودی برای مبلغ پرداخت‌شده
-            payment_input = NumberInput()
-            payment_input.setPlaceholderText("مبلغ پرداخت‌شده")
-            layout.addRow("مبلغ پرداخت‌شده:", payment_input)
+            self.settle_payment_input = NumberInput()
+            self.settle_payment_input.setPlaceholderText("مبلغ پرداخت‌شده (اختیاری)")
+            # اگر حالت تسویه جزئی باشد و مبلغ باقی‌مانده مثبت باشد، آن را به عنوان پیش‌فرض قرار دهید.
+            # و فقط در صورتی که چک‌باکس فعال بود، این مقدار نمایش داده شود
+            if account_id is not None and remaining_amount > 0:
+                self.settle_payment_input.setText(str(remaining_amount)) # پیش‌فرض: کل مبلغ باقی‌مانده
+
+            layout.addRow("مبلغ پرداخت‌شده:", self.settle_payment_input)
 
             # انتخاب حساب
-            settle_account = QComboBox()
+            self.settle_account_combo = QComboBox()
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
                 display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
-                settle_account.addItem(display_text, acc_id)
+                self.settle_account_combo.addItem(display_text, acc_id)
             if account_id:  # اگه قبلاً حسابی انتخاب شده بود، اون رو پیش‌فرض قرار بده
-                settle_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
-            layout.addRow("حساب مرتبط:", settle_account)
+                for i in range(self.settle_account_combo.count()):
+                    if self.settle_account_combo.itemData(i) == account_id:
+                        self.settle_account_combo.setCurrentIndex(i)
+                        break
+            layout.addRow("حساب مرتبط:", self.settle_account_combo)
+
+            # کنترل فعال/غیرفعال بودن فیلدها بر اساس چک‌باکس
+            def toggle_settle_fields(state):
+                is_checked = (state == Qt.CheckState.Checked.value)
+                self.settle_payment_input.setEnabled(is_checked)
+                self.settle_account_combo.setEnabled(is_checked)
+                
+                # اگر غیرفعال شد، مبلغ و حساب را پاک می‌کنیم یا به حالت پیش‌فرض برمی‌گردانیم
+                if not is_checked:
+                    self.settle_payment_input.clear()
+                    self.settle_account_combo.setCurrentIndex(0) # انتخاب آیتم پیش‌فرض (None)
+                else:
+                    # اگر فعال شد، مبلغ باقی‌مانده را نمایش می‌دهیم
+                    self.settle_payment_input.setText(str(remaining_amount))
+
+            self.settle_has_payment_checkbox.stateChanged.connect(toggle_settle_fields)
+            # وضعیت اولیه فیلدها را تنظیم کنید
+            toggle_settle_fields(self.settle_has_payment_checkbox.checkState().value)
+
 
             # دکمه تأیید
-            confirm_btn = QPushButton("تأیید پرداخت")
+            confirm_btn = QPushButton("تأیید تسویه")
             confirm_btn.clicked.connect(lambda: self.confirm_partial_payment(
-                debt_id, payment_input.get_raw_value(), settle_account.currentData(), is_credit, dialog
+                debt_id,
+                self.settle_payment_input.get_raw_value(),
+                self.settle_account_combo.currentData(),
+                is_credit,
+                self.settle_has_payment_checkbox.isChecked(), # وضعیت چک‌باکس را پاس می‌دهیم
+                dialog
             ))
             layout.addRow(confirm_btn)
 
@@ -3309,60 +3357,93 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def confirm_partial_payment(self, debt_id, payment_amount, account_id, is_credit, dialog):
+    def confirm_partial_payment(self, debt_id, payment_amount, account_id, is_credit, has_transfer_checked, dialog):
         try:
-            if not payment_amount or payment_amount <= 0:
-                QMessageBox.warning(self, "خطا", "مبلغ پرداخت‌شده باید بیشتر از صفر باشد!")
-                return
-
-            self.db_manager.execute("SELECT amount, paid_amount, account_id FROM debts WHERE id = ?", (debt_id,))
+            self.db_manager.execute("SELECT amount, paid_amount, person_id FROM debts WHERE id = ?", (debt_id,))
             debt = self.db_manager.fetchone()
             if not debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
+                self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
                 return
-            amount, paid_amount, debt_account_id = debt
-            remaining_amount = amount - paid_amount
+            total_debt_amount, current_paid_amount, person_id = debt
+            remaining_amount = total_debt_amount - current_paid_amount
 
-            if payment_amount > remaining_amount:
-                QMessageBox.warning(self, "خطا", "مبلغ پرداخت‌شده نمی‌تواند بیشتر از مبلغ باقی‌مانده باشد!")
-                return
-
-            # بررسی موجودی حساب برای بدهی (اگه بخوایم پول پرداخت کنیم)
-            if not is_credit and account_id:  # بدهی من: پرداخت پول
-                self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
-                balance = self.db_manager.fetchone()[0]
-                if balance < payment_amount:
-                    QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
+            if has_transfer_checked: # اگر چک‌باکس "انتقال وجه انجام می‌شود" فعال بود
+                if payment_amount is None or payment_amount <= 0:
+                    QMessageBox.warning(self, "خطا", "مبلغ پرداخت‌شده باید بیشتر از صفر باشد!")
+                    self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
+                    return
+                if not account_id:
+                    QMessageBox.warning(self, "خطا", "لطفاً حساب مرتبط را انتخاب کنید!")
+                    self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
                     return
 
-            # به‌روزرسانی paid_amount
-            new_paid_amount = paid_amount + payment_amount
-            is_paid = 1 if new_paid_amount >= amount else 0
+                if payment_amount > remaining_amount:
+                    QMessageBox.warning(self, "خطا", "مبلغ پرداخت‌شده نمی‌تواند بیشتر از مبلغ باقی‌مانده باشد!")
+                    self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
+                    return
+                
+                # بررسی موجودی حساب برای بدهی (اگه بخوایم پول پرداخت کنیم)
+                if not is_credit:  # بدهی من: پرداخت پول
+                    self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
+                    balance = self.db_manager.fetchone()[0]
+                    if balance < payment_amount:
+                        QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
+                        self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
+                        return
 
-            # چاپ برای دیباگ
-            #print(f"Debt ID: {debt_id}, Amount: {amount}, Paid: {new_paid_amount}, Is Paid: {is_paid}")
-
-            # به‌روزرسانی در دیتابیس
-            self.db_manager.execute(
-                "UPDATE debts SET paid_amount = ?, is_paid = ? WHERE id = ?",
-                (new_paid_amount, is_paid, debt_id)
-            )
-
-            # به‌روزرسانی موجودی حساب
-            if account_id:
+                # به‌روزرسانی paid_amount
+                new_paid_amount = current_paid_amount + payment_amount
+                
+                # به‌روزرسانی موجودی حساب
                 if is_credit:  # طلب من: دریافت پول (اضافه کردن به حساب)
                     self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (payment_amount, account_id))
                 else:  # بدهی من: پرداخت پول (کم کردن از حساب)
                     self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (payment_amount, account_id))
+                
+                # ثبت تراکنش مرتبط
+                category_name = "تسویه طلب" if is_credit else "تسویه بدهی"
+                category_type = "income" if is_credit else "expense"
+                self.db_manager.execute("SELECT id FROM categories WHERE name = ? AND type = ?", (category_name, category_type))
+                category_id_from_db = self.db_manager.fetchone()
+                if not category_id_from_db:
+                    QMessageBox.critical(self, "خطا", f"خطای سیستمی: دسته‌بندی '{category_name}' یافت نشد. لطفاً برنامه را مجدداً راه‌اندازی کنید یا با پشتیبانی تماس بگیرید.")
+                    self.db_manager.rollback()
+                    return 
+                category_id_from_db = category_id_from_db[0]
+
+                today_gregorian = datetime.now().strftime("%Y-%m-%d")
+                
+                self.db_manager.execute('SELECT name FROM persons WHERE id = ?', (person_id,))
+                person_name = self.db_manager.fetchone()[0]
+
+                description = f"تسویه {format_number(payment_amount)} از {'طلب' if is_credit else 'بدهی'} با شخص {person_name}"
+                self.db_manager.execute(
+                    "INSERT INTO transactions (account_id, person_id, category_id, amount, date, description) VALUES (?, ?, ?, ?, ?, ?)",
+                    (account_id, person_id, category_id_from_db, payment_amount, today_gregorian, description)
+                )
+
+            else:
+                payment_amount = remaining_amount 
+                new_paid_amount = current_paid_amount + payment_amount
+                account_id = None
+            
+            is_paid = 1 if new_paid_amount >= total_debt_amount else 0
+
+            self.db_manager.execute(
+                "UPDATE debts SET paid_amount = ?, is_paid = ?, account_id = ? WHERE id = ?",
+                (new_paid_amount, is_paid, account_id, debt_id)
+            )
 
             self.db_manager.commit()
             self.load_debts()
             self.load_accounts()
             self.update_dashboard()
             dialog.accept()
-            QMessageBox.information(self, "موفق", f"پرداخت به مبلغ {format_number(payment_amount)} ریال ثبت شد!")
+            QMessageBox.information(self, "موفق", f"پرداخت به مبلغ {format_number(payment_amount)} ریال ثبت شد! وضعیت تسویه: {'کامل' if is_paid else 'جزئی'}")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            self.db_manager.rollback() # اطمینان از rollback در صورت بروز خطا
 
     
     def confirm_settle_debt(self, debt_id, remaining_amount, account_id, has_payment, is_credit, dialog):

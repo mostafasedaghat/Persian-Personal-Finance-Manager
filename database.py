@@ -34,6 +34,10 @@ class DatabaseManager:
         if self.conn:
             self.conn.commit()
 
+    def rollback(self):
+        if self.conn:
+            self.conn.rollback()
+
     def close(self):
         if self.conn:
             self.conn.commit()
