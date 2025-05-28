@@ -1983,15 +1983,70 @@ class FinanceApp(QMainWindow):
         form_layout.addRow("نام دسته‌بندی:", self.category_name_input)
         form_layout.addRow("نوع:", self.category_type)
         form_layout.addRow(add_category_btn)
+
+        # New: Search input for categories
+        self.category_search_input = QLineEdit()
+        self.category_search_input.setPlaceholderText("جستجو بر اساس نام دسته‌بندی (حداقل ۲ حرف)")
+        # Connect textChanged signal to filter_categories_table method
+        self.category_search_input.textChanged.connect(self.filter_categories_table)
+        form_layout.addRow("جستجو:", self.category_search_input) # Add the search input to the form layout
+
         self.categories_table = QTableWidget()
         self.categories_table.setColumnCount(5)
         self.categories_table.setHorizontalHeaderLabels(["شناسه", "نام", "نوع", "ویرایش", "حذف"])
         self.categories_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        # Set column widths for better display
+        self.categories_table.setColumnWidth(0, 50)  # ID
+        self.categories_table.setColumnWidth(1, 300) # Name
+        self.categories_table.setColumnWidth(2, 100) # Type
+        self.categories_table.setColumnWidth(3, 80)  # Edit button
+        self.categories_table.setColumnWidth(4, 80)  # Delete button
+
         layout.addLayout(form_layout)
         layout.addWidget(self.categories_table)
         self.load_categories_table()  # بارگذاری اولیه جدول
         tab.setLayout(layout)
         return tab
+    
+    def filter_categories_table(self, search_text):
+        # Only filter if the search text has more than one character
+        if len(search_text) < 2 and search_text != "":
+            self.load_categories_table() # Reload all categories if search text is too short or empty
+            return
+        
+        try:
+            self.categories_table.setRowCount(0) # Clear existing rows
+            
+            # If search_text is empty, load all categories
+            if not search_text:
+                self.load_categories_table()
+                return
+
+            # Query the database for matching categories
+            # Using LIKE for partial matching and COLLATE NOCASE for case-insensitive search
+            self.db_manager.execute(
+                "SELECT id, name, type FROM categories WHERE name LIKE ? ORDER BY name ASC",
+                (f"%{search_text}%",)
+            )
+            filtered_categories = self.db_manager.fetchall()
+
+            self.categories_table.setRowCount(len(filtered_categories))
+            for row, (id, name, category_type) in enumerate(filtered_categories):
+                self.categories_table.setItem(row, 0, QTableWidgetItem(str(id)))
+                self.categories_table.setItem(row, 1, QTableWidgetItem(name))
+                self.categories_table.setItem(row, 2, QTableWidgetItem("درآمد" if category_type == "income" else "هزینه"))
+                
+                edit_btn = QPushButton("ویرایش")
+                edit_btn.clicked.connect(lambda checked, cat_id=id: self.edit_category(cat_id))
+                self.categories_table.setCellWidget(row, 3, edit_btn)
+                
+                delete_btn = QPushButton("حذف")
+                delete_btn.clicked.connect(lambda checked, cat_id=id: self.delete_category(cat_id))
+                self.categories_table.setCellWidget(row, 4, delete_btn)
+                
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده هنگام جستجو: {e}")
     
     def create_settings_tab(self):
         tab = QWidget()
