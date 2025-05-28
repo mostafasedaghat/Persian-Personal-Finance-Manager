@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget,
                              QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
                              QTableWidgetItem, QLabel, QLineEdit, QComboBox,
                              QMessageBox, QFormLayout, QGridLayout, QScrollArea, 
-                             QDialog, QCheckBox, QCalendarWidget,QSpacerItem, QSizePolicy)
+                             QDialog, QCheckBox, QCalendarWidget,QSpacerItem, QSizePolicy, QFrame)
 from PyQt6.QtCore import QDate, Qt, QTimer, QLocale  # اضافه کردن QLocale
 from PyQt6.QtGui import QIcon, QFont, QColor, QIntValidator
 import sqlite3
@@ -2073,7 +2073,7 @@ class FinanceApp(QMainWindow):
         
         # هدر تب تنظیمات
         header = QLabel("⚙️ تنظیمات")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #333; padding: 10px;")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFF; padding: 10px;")
         layout.addWidget(header)
         
         # دکمه تغییر رمز عبور
@@ -2094,10 +2094,19 @@ class FinanceApp(QMainWindow):
             }
         """)
         layout.addWidget(change_password_btn)
+
+        # --- اضافه کردن خط جداکننده اول ---
+        separator1 = QFrame()
+        separator1.setFrameShape(QFrame.Shape.HLine) # خط افقی
+        separator1.setFrameShadow(QFrame.Shadow.Sunken)
+        separator1.setFixedHeight(2) # می‌توانید ارتفاع (ضخامت) خط را تنظیم کنید
+        separator1.setStyleSheet("background-color: #c0c0c0;") # رنگ خط
+        layout.addWidget(separator1)
+        # ---------------------------------
         
         # بخش تنظیم توکن Dropbox
         token_label = QLabel("توکن دسترسی Dropbox:")
-        token_label.setStyleSheet("font-size: 14px; color: #333;")
+        token_label.setStyleSheet("font-family: Vazir, Arial;font-size: 14px; color: #FFF;")
         layout.addWidget(token_label)
         
         self.dropbox_token_input = QLineEdit()
@@ -2124,6 +2133,7 @@ class FinanceApp(QMainWindow):
             QPushButton {
                 font-size: 14px;
                 font-weight: bold;
+                font-family: Vazir, Arial;
                 padding: 10px;
                 background-color: #4CAF50;
                 color: white;
@@ -2135,7 +2145,7 @@ class FinanceApp(QMainWindow):
             }
         """)
         layout.addWidget(save_token_btn)
-        
+
         # دکمه بکاپ‌گیری آنلاین به Dropbox
         backup_btn = QPushButton("بکاپ‌گیری آنلاین")
         backup_btn.clicked.connect(self.backup_to_dropbox)
@@ -2143,6 +2153,7 @@ class FinanceApp(QMainWindow):
             QPushButton {
                 font-size: 14px;
                 font-weight: bold;
+                font-family: Vazir, Arial;                                 
                 padding: 10px;
                 background-color: #FF9800;
                 color: white;
@@ -2154,12 +2165,90 @@ class FinanceApp(QMainWindow):
             }
         """)
         layout.addWidget(backup_btn)
+
+        # --- اضافه کردن خط جداکننده اول ---
+        separator1 = QFrame()
+        separator1.setFrameShape(QFrame.Shape.HLine) # خط افقی
+        separator1.setFrameShadow(QFrame.Shadow.Sunken)
+        separator1.setFixedHeight(2) # می‌توانید ارتفاع (ضخامت) خط را تنظیم کنید
+        separator1.setStyleSheet("background-color: #c0c0c0;") # رنگ خط
+        layout.addWidget(separator1)
+        # ---------------------------------
+
+        offline_backup_btn = QPushButton("💾 بکاپ‌گیری آفلاین (در پوشه برنامه)") # یا "پشتیبان‌گیری محلی"
+        offline_backup_btn.clicked.connect(self.backup_offline)
+        offline_backup_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                font-family: Vazir, Arial;
+                padding: 10px;
+                background-color: #007BFF; /* یک رنگ متفاوت، مثلا آبی */
+                color: white;
+                border-radius: 5px;
+                max-width: 250px; /* ممکن است نیاز به عرض بیشتری داشته باشد */
+                margin-top: 10px; /* برای ایجاد کمی فاصله از دکمه بالایی */
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+        """)
+        layout.addWidget(offline_backup_btn)
         
         # فاصله‌گذاری برای ظاهر بهتر
         layout.addStretch()
         
         tab.setLayout(layout)
         return tab
+    
+    def backup_offline(self):
+        db_path = "finance.db" # مسیر فایل دیتابیس اصلی
+
+        # نام و مسیر پوشه بکاپ
+        backup_folder_name = "database-backup"
+        # مسیر پایه برنامه (جایی که اسکریپت یا فایل اجرایی قرار دارد)
+        # استفاده از os.path.dirname(os.path.abspath(sys.argv[0])) برای دقت بیشتر در محیط‌های مختلف
+        # یا اگر با PyInstaller کار می‌کنید، باید مسیر مناسب را با توجه به آن تنظیم کنید.
+        # برای سادگی، مسیر جاری را در نظر می‌گیریم و یک پوشه در آن می‌سازیم.
+        base_path = os.getcwd() # یا مسیر دقیق‌تر مدنظرتان
+        backup_dir_path = os.path.join(base_path, backup_folder_name)
+
+        # ایجاد نام فایل بکاپ با تاریخ و زمان
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"finance_backup_offline_{timestamp}.db"
+
+        # مسیر کامل فایل بکاپ درون پوشه database-backup
+        backup_filepath = os.path.join(backup_dir_path, backup_filename)
+
+        try:
+
+            # ایجاد پوشه بکاپ اگر وجود ندارد
+            # exist_ok=True باعث می‌شود اگر پوشه از قبل وجود داشته باشد، خطایی رخ ندهد.
+            os.makedirs(backup_dir_path, exist_ok=True)
+
+            # ابتدا اتصال به دیتابیس اصلی را موقتا می‌بندیم (اگر باز است)
+            # یا مطمئن می‌شویم که هیچ تراکنش در حال انجام نیست.
+            # ساده‌ترین راه، استفاده از یک اتصال جدید برای VACUUM INTO است.
+
+            # اطمینان از بسته بودن اتصال اصلی دیتابیس منیجر قبل از بکاپ‌گیری
+            # این کار برای جلوگیری از قفل شدن دیتابیس مهم است.
+            # اگر db_manager شما اتصال را باز نگه می‌دارد، باید آن را ببندید.
+            # در کد شما، db_manager اتصال را در صورت نیاز باز می‌کند و می‌بندد،
+            # اما VACUUM روی دیتابیس فعال ممکن است مشکل‌ساز باشد.
+            # بهتر است db_manager.close() را قبل از بکاپ صدا بزنید و بعد دوباره connect کنید.
+            # یا از یک کانکشن مجزا فقط برای بکاپ استفاده کنید.
+
+            # راه حل ساده‌تر: استفاده از یک کانکشن جدید برای عملیات VACUUM
+            source_conn = sqlite3.connect(db_path)
+            source_conn.execute(f"VACUUM INTO '{backup_filepath}'")
+            source_conn.close()
+
+            QMessageBox.information(self, "موفقیت", f"بکاپ آفلاین با موفقیت در مسیر زیر ذخیره شد:\n{backup_filepath}")
+
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا در بکاپ آفلاین", f"خطای پایگاه داده هنگام ایجاد بکاپ: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "خطا در بکاپ آفلاین", f"یک خطای غیرمنتظره رخ داد: {e}")
     
     def save_dropbox_token(self):
         from PyQt6.QtWidgets import QMessageBox
