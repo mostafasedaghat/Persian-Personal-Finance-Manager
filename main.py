@@ -1991,6 +1991,15 @@ class FinanceApp(QMainWindow):
         self.category_search_input.textChanged.connect(self.filter_categories_table)
         form_layout.addRow("جستجو:", self.category_search_input) # Add the search input to the form layout
 
+
+        # New: Dropdown filter for category types
+        self.category_filter_dropdown = QComboBox()
+        self.category_filter_dropdown.addItems(["نمایش همه", "نمایش فقط دسته بندی هزینه ها", "نمایش فقط دسته بندی درامد ها"])
+        # Connect the dropdown's currentIndexChanged signal to the new filter method
+        self.category_filter_dropdown.currentIndexChanged.connect(self.apply_category_type_filter)
+        form_layout.addRow("فیلتر نوع دسته‌بندی:", self.category_filter_dropdown) # Add the dropdown to the form layout
+
+
         self.categories_table = QTableWidget()
         self.categories_table.setColumnCount(5)
         self.categories_table.setHorizontalHeaderLabels(["شناسه", "نام", "نوع", "ویرایش", "حذف"])
@@ -2010,25 +2019,35 @@ class FinanceApp(QMainWindow):
         return tab
     
     def filter_categories_table(self, search_text):
-        # Only filter if the search text has more than one character
-        if len(search_text) < 2 and search_text != "":
-            self.load_categories_table() # Reload all categories if search text is too short or empty
-            return
-        
-        try:
-            self.categories_table.setRowCount(0) # Clear existing rows
-            
-            # If search_text is empty, load all categories
-            if not search_text:
-                self.load_categories_table()
-                return
+        # This method now only handles the text search.
+        # It calls apply_category_type_filter to also apply the type filter.
+        self.apply_category_type_filter()
 
-            # Query the database for matching categories
-            # Using LIKE for partial matching and COLLATE NOCASE for case-insensitive search
-            self.db_manager.execute(
-                "SELECT id, name, type FROM categories WHERE name LIKE ? ORDER BY name ASC",
-                (f"%{search_text}%",)
-            )
+    def apply_category_type_filter(self):
+        try:
+            filter_text = self.category_filter_dropdown.currentText()
+            search_text = self.category_search_input.text()
+
+            query = "SELECT id, name, type FROM categories "
+            params = []
+            where_clauses = []
+
+            if filter_text == "نمایش فقط دسته بندی هزینه ها":
+                where_clauses.append("type = 'expense'")
+            elif filter_text == "نمایش فقط دسته بندی درامد ها":
+                where_clauses.append("type = 'income'")
+            # If "نمایش همه" is selected, no type filter is added
+
+            if len(search_text) >= 2:
+                where_clauses.append("name LIKE ?")
+                params.append(f"%{search_text}%")
+
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
+            
+            query += " ORDER BY name ASC"
+
+            self.db_manager.execute(query, tuple(params))
             filtered_categories = self.db_manager.fetchall()
 
             self.categories_table.setRowCount(len(filtered_categories))
@@ -2046,7 +2065,7 @@ class FinanceApp(QMainWindow):
                 self.categories_table.setCellWidget(row, 4, delete_btn)
                 
         except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده هنگام جستجو: {e}")
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده هنگام فیلتر دسته‌بندی‌ها: {e}")
     
     def create_settings_tab(self):
         tab = QWidget()
@@ -2313,22 +2332,9 @@ class FinanceApp(QMainWindow):
         self.update_categories()  # به جای کد قبلی، از متد جدید استفاده می‌کنیم
 
     def load_categories_table(self):
-        try:
-            self.db_manager.execute("SELECT id, name, type FROM categories")
-            categories = self.db_manager.fetchall()
-            self.categories_table.setRowCount(len(categories))
-            for row, (id, name, category_type) in enumerate(categories):
-                self.categories_table.setItem(row, 0, QTableWidgetItem(str(id)))
-                self.categories_table.setItem(row, 1, QTableWidgetItem(name))
-                self.categories_table.setItem(row, 2, QTableWidgetItem("درآمد" if category_type == "income" else "هزینه"))
-                edit_btn = QPushButton("ویرایش")
-                edit_btn.clicked.connect(lambda checked, cat_id=id: self.edit_category(cat_id))
-                self.categories_table.setCellWidget(row, 3, edit_btn)
-                delete_btn = QPushButton("حذف")
-                delete_btn.clicked.connect(lambda checked, cat_id=id: self.delete_category(cat_id))
-                self.categories_table.setCellWidget(row, 4, delete_btn)
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+        # This method is now simplified to call the main filtering method,
+        # ensuring all filters are applied when the tab is loaded or categories are reloaded.
+        self.apply_category_type_filter()
 
     def edit_category(self, category_id):
         try:
