@@ -1957,17 +1957,36 @@ class FinanceApp(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout()
         form_layout = QFormLayout()
+
         self.person_name_input = QLineEdit()
         add_person_btn = QPushButton("افزودن شخص")
         add_person_btn.clicked.connect(self.add_person)
+
         form_layout.addRow("نام شخص:", self.person_name_input)
         form_layout.addRow(add_person_btn)
+
+        # اضافه کردن فیلد جستجو
+        self.person_search_input = QLineEdit()
+        self.person_search_input.setPlaceholderText("جستجو بر اساس نام شخص")
+        self.person_search_input.textChanged.connect(self.filter_persons_table) # اتصال سیگنال به متد فیلتر
+        form_layout.addRow("جستجو:", self.person_search_input)
+
         self.persons_table = QTableWidget()
         self.persons_table.setColumnCount(3)
         self.persons_table.setHorizontalHeaderLabels(["شناسه", "نام", "اقدامات"])
         self.persons_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        
+        # تنظیم عرض ستون‌ها برای نمایش بهتر
+        self.persons_table.setColumnWidth(0, 50)  # شناسه
+        self.persons_table.setColumnWidth(1, 250) # نام
+        self.persons_table.setColumnWidth(2, 100) # اقدامات
+
         layout.addLayout(form_layout)
         layout.addWidget(self.persons_table)
+        
+        # بارگذاری اولیه اشخاص بعد از ایجاد جدول و فیلد جستجو
+        self.load_persons() 
+
         tab.setLayout(layout)
         return tab
 
@@ -3998,24 +4017,51 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def load_persons(self):
+    def filter_persons_table(self):
+        search_text = self.person_search_input.text().strip()
         try:
-            self.db_manager.execute("SELECT id, name FROM persons")
+            query = "SELECT id, name FROM persons"
+            params = []
+            
+            if search_text:
+                query += " WHERE name LIKE ?"
+                params.append(f"%{search_text}%")
+            
+            query += " ORDER BY name ASC" # مرتب‌سازی بر اساس نام
+
+            self.db_manager.execute(query, tuple(params))
             persons = self.db_manager.fetchall()
+
             self.persons_table.setRowCount(len(persons))
-            self.transaction_person.clear()
-            self.debt_person.clear()
-            # اضافه کردن گزینه پیش‌فرض
-            self.transaction_person.addItem("-", None)
-            self.debt_person.addItem("-", None)
             for row, (id, name) in enumerate(persons):
                 self.persons_table.setItem(row, 0, QTableWidgetItem(str(id)))
                 self.persons_table.setItem(row, 1, QTableWidgetItem(name))
-                self.transaction_person.addItem(name, id)
-                self.debt_person.addItem(name, id)
+                
                 edit_btn = QPushButton("ویرایش")
                 edit_btn.clicked.connect(lambda checked, p_id=id: self.edit_person(p_id))
                 self.persons_table.setCellWidget(row, 2, edit_btn)
+
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده هنگام فیلتر اشخاص: {e}")
+
+    def load_persons(self):
+        # به جای بارگذاری مستقیم از دیتابیس و پر کردن جدول، متد فیلتر را فراخوانی می‌کنیم
+        # این کار تضمین می‌کند که فیلتر اعمال شود و کامبوباکس‌ها نیز به‌روز شوند.
+        try:
+            self.filter_persons_table() # ابتدا جدول را فیلتر و پر می‌کنیم
+
+            # به‌روزرسانی کامبوباکس‌ها (برای تراکنش‌ها و بدهی‌ها)
+            self.transaction_person.clear()
+            self.debt_person.clear()
+            self.transaction_person.addItem("-", None)
+            self.debt_person.addItem("-", None)
+
+            self.db_manager.execute("SELECT id, name FROM persons ORDER BY name ASC")
+            all_persons = self.db_manager.fetchall()
+            for id, name in all_persons:
+                self.transaction_person.addItem(name, id)
+                self.debt_person.addItem(name, id)
+
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
