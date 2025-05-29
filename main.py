@@ -1114,10 +1114,10 @@ class FinanceApp(QMainWindow):
 
         scroll_area = QScrollArea()
         self.loans_table = QTableWidget()
-        self.loans_table.setColumnCount(12) # تعداد ستون‌ها ثابت می‌ماند
+        self.loans_table.setColumnCount(13) # تعداد ستون‌ها ثابت می‌ماند
         self.loans_table.setHorizontalHeaderLabels([
             "شناسه", "نوع", "عنوان", "مبلغ", "پرداخت‌شده", "سود", # تغییر "بانک" به "عنوان"
-            "شروع", "اقساط کل", "اقساط پرداخت", "مبلغ قسط", "ویرایش", "مشاهده اقساط"
+            "شروع", "اقساط کل", "اقساط پرداخت", "مبلغ قسط", "ویرایش", "مشاهده اقساط", "خروجی"
         ])
         self.loans_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.loans_table.verticalHeader().setDefaultSectionSize(40)
@@ -1133,6 +1133,8 @@ class FinanceApp(QMainWindow):
         self.loans_table.setColumnWidth(9, 100)
         self.loans_table.setColumnWidth(10, 80)
         self.loans_table.setColumnWidth(11, 120)
+        self.loans_table.setColumnWidth(12, 80)
+
         scroll_area.setWidget(self.loans_table)
         scroll_area.setWidgetResizable(True)
         scroll_area.setMinimumHeight(400)
@@ -1939,6 +1941,49 @@ class FinanceApp(QMainWindow):
         dialog.setLayout(layout)
         dialog.exec()
 
+    def export_single_loan_report(self, loan_id):
+        try:
+            self.db_manager.execute(
+                """
+                SELECT id, amount, due_date, is_paid FROM loan_installments WHERE loan_id = ? ORDER BY due_date
+                """,
+                (loan_id,)
+            )
+            installments = self.db_manager.fetchall()
+
+            # گرفتن اطلاعات کلی وام برای عنوان گزارش (اختیاری برای استفاده در نام فایل یا عنوان PDF) [cite: 1]
+            self.db_manager.execute(
+                "SELECT bank_name, total_amount, type FROM loans WHERE id = ?", (loan_id,)
+            )
+            loan_info = self.db_manager.fetchone()
+            loan_title = loan_info[0] if loan_info else "وام" # [cite: 1]
+            # loan_total_amount = loan_info[1] if loan_info else 0 # [cite: 1]
+            # loan_type = loan_info[2] if loan_info else "نامشخص" # [cite: 1]
+
+            # پردازش داده‌ها برای ReportLab (عنوان و وضعیت) [cite: 1]
+            processed_data = []
+            for id, amount, due_date, is_paid in installments:
+                status_text = "پرداخت‌شده" if is_paid else "پرداخت‌نشده"
+                processed_data.append((id, format_number(amount), gregorian_to_shamsi(due_date), status_text)) # فرمت‌بندی اینجا [cite: 1]
+
+            # حالا این داده‌های پردازش شده را به generate_export می‌فرستیم [cite: 1]
+            # generate_export انتظار یک DataFrame با نام ستون‌های مشخص را دارد [cite: 1]
+            # بنابراین، باید یک DataFrame موقت بسازیم و به generate_export بفرستیم [cite: 1]
+            
+            # در اینجا، ReportLab نیاز به ستون‌ها و داده‌های پردازش شده دارد [cite: 1]
+            # پس یک DataFrame از آن می‌سازیم و ستون‌ها را مشخص می‌کنیم [cite: 1]
+            
+            # ارسال data مستقیم به generate_export و تنظیم columns در آنجا
+            # self.generate_export(temp_df_data, "loan_installments_report", "pdf", None)
+            
+            # از dialog برای انتخاب نوع خروجی استفاده می‌کنیم [cite: 1]
+            self.export_report(processed_data, "loan_installments_report") # [cite: 1]
+
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "خطا", f"خطای عمومی در تولید گزارش وام: {e}")
+
     def generate_export(self, data, report_type, format_type, dialog):
         try:
             base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -2015,9 +2060,21 @@ class FinanceApp(QMainWindow):
                 )
                 df["تاریخ"] = df["تاریخ"].apply(lambda x: gregorian_to_shamsi(x) if x != "-" else "-")
                 df["مبلغ"] = df["مبلغ"].apply(lambda x: format_number(x) if isinstance(x, (int, float)) else x)
+
             elif report_type == "general":
                 df = pd.DataFrame(data, columns=["معیار", "مقدار"])
-            # --- پایان بخش تولید DataFrame ---
+            elif report_type == "loan_installments_report": # اضافه کردن این نوع گزارش جدید [cite: 1]
+                df = pd.DataFrame(
+                    data,
+                    columns=["شناسه قسط", "مبلغ قسط", "سررسید", "وضعیت"] # [cite: 1]
+                )
+                # در اینجا نیازی به gregorian_to_shamsi یا format_number نیست
+                # چون data قبلا در export_single_loan_report فرمت شده است. [cite: 1]
+                
+            else: # در صورت عدم تطابق نوع گزارش
+                QMessageBox.warning(self, "خطا", "نوع گزارش نامعتبر برای تولید خروجی!")
+                if dialog: dialog.accept()
+                return
 
             if format_type == "excel":
                 df.to_excel(output_path, index=False, engine='openpyxl')
@@ -2120,6 +2177,13 @@ class FinanceApp(QMainWindow):
                     col_widths = [
                         usable_width * 0.40, # معیار
                         usable_width * 0.60  # مقدار (افزایش)
+                    ]
+                elif report_type == "loan_installments_report": # عرض ستون‌ها برای گزارش اقساط وام [cite: 1]
+                    col_widths = [
+                        usable_width * 0.15, # شناسه قسط [cite: 1]
+                        usable_width * 0.30, # مبلغ قسط (بیشترین پهنا) [cite: 1]
+                        usable_width * 0.25, # سررسید [cite: 1]
+                        usable_width * 0.30  # وضعیت (بیشترین پهنا) [cite: 1]
                     ]
                 else:
                     # به عنوان بازگشت، عرض مساوی
@@ -4188,9 +4252,15 @@ class FinanceApp(QMainWindow):
                 edit_btn = QPushButton("ویرایش")
                 edit_btn.clicked.connect(lambda checked, l_id=id: self.edit_loan(l_id))
                 self.loans_table.setCellWidget(row, 10, edit_btn)
+                
                 view_btn = QPushButton("مشاهده اقساط")
                 view_btn.clicked.connect(lambda checked, l_id=id: self.view_installments(l_id))
                 self.loans_table.setCellWidget(row, 11, view_btn)
+
+                # دکمه جدید خروجی [cite: 1]
+                export_loan_btn = QPushButton("خروجی")
+                export_loan_btn.clicked.connect(lambda checked, l_id=id: self.export_single_loan_report(l_id)) # [cite: 1]
+                self.loans_table.setCellWidget(row, 12, export_loan_btn) # [cite: 1]
             self.loans_page_label.setText(f"صفحه {self.loans_current_page}")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
