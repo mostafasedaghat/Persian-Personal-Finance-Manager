@@ -1025,49 +1025,79 @@ class FinanceApp(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout()
         form_layout = QFormLayout()
+
         self.loan_type = QComboBox()
         self.loan_type.addItems(["وام گرفته‌شده", "وام داده‌شده"])
-        self.loan_bank = QLineEdit()
+
+        # 1. تغییر نام فیلد نام بانک به عنوان وام
+        self.loan_title = QLineEdit() # تغییر نام متغیر
+        
         self.loan_amount = NumberInput()
         self.loan_interest = NumberInput()
         self.loan_account = QComboBox()
+        
+        # 2. تغییر لیبل تاریخ شروع به تاریخ دریافت وام
         self.loan_start_date = QLineEdit()
         today = datetime.now().date()
         self.loan_start_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.loan_start_date.setPlaceholderText("1404/02/13")
         self.loan_start_date.setReadOnly(True)
         self.loan_start_date.mousePressEvent = lambda event: self.show_calendar_popup(self.loan_start_date)
+        
         self.loan_installments_total = NumberInput()
         self.loan_installments_paid = NumberInput()
         self.loan_installment_amount = NumberInput()
-        self.loan_installment_interval = NumberInput()
-        self.loan_installment_interval.setPlaceholderText("30")
 
-        # چک‌باکس جدید: آیا مبلغ وام به حساب اضافه شود؟
+        # 3. ایجاد دراپ‌داون برای فاصله اقساط
+        self.loan_interval_type_combo = QComboBox()
+        self.loan_interval_type_combo.addItems([
+            "هر یک ماه",
+            "هر دو ماه",
+            "هر سه ماه",
+            "هر چهار ماه",
+            "هر پنج ماه",
+            "هر شش ماه",
+            "هر یک سال",
+            "فاصله دلخواه"
+        ])
+        
+        # فیلد برای وارد کردن فاصله دلخواه (مخفی اولیه)
+        self.loan_custom_interval_input = NumberInput()
+        self.loan_custom_interval_input.setPlaceholderText("فاصله دلخواه (بر حسب روز)")
+        self.loan_custom_interval_input.setVisible(False) # در ابتدا مخفی باشد
+
+        # اتصال سیگنال برای نمایش/عدم نمایش فیلد فاصله دلخواه
+        self.loan_interval_type_combo.currentTextChanged.connect(self.toggle_custom_interval_field)
+
+
+        # چک‌باکس "مبلغ وام به حساب اضافه شود؟"
         self.loan_add_to_account_checkbox = QCheckBox("مبلغ وام به حساب اضافه/کم شود؟")
         self.loan_add_to_account_checkbox.setChecked(True) # به صورت پیش‌فرض فعال
 
         add_loan_btn = QPushButton("ثبت وام")
         add_loan_btn.clicked.connect(self.add_loan)
+
         form_layout.addRow("نوع وام:", self.loan_type)
-        form_layout.addRow("نام بانک:", self.loan_bank)
+        form_layout.addRow("عنوان وام:", self.loan_title) # تغییر لیبل
         form_layout.addRow("مبلغ کل:", self.loan_amount)
         form_layout.addRow("نرخ سود (%):", self.loan_interest)
         form_layout.addRow("حساب مرتبط:", self.loan_account)
-        form_layout.addRow("", self.loan_add_to_account_checkbox) # اضافه کردن چک‌باکس
-        form_layout.addRow("تاریخ شروع (شمسی):", self.loan_start_date)
+        form_layout.addRow("", self.loan_add_to_account_checkbox)
+        form_layout.addRow("تاریخ دریافت وام:", self.loan_start_date) # تغییر لیبل
         form_layout.addRow("تعداد اقساط کل:", self.loan_installments_total)
         form_layout.addRow("تعداد اقساط پرداخت‌شده:", self.loan_installments_paid)
         form_layout.addRow("مبلغ هر قسط:", self.loan_installment_amount)
-        form_layout.addRow("فاصله اقساط (روز):", self.loan_installment_interval)
+        form_layout.addRow("فاصله اقساط:", self.loan_interval_type_combo) # اضافه کردن کامبوباکس
+        form_layout.addRow("", self.loan_custom_interval_input) # اضافه کردن فیلد دلخواه
         form_layout.addRow(add_loan_btn)
+        
         layout.addLayout(form_layout)
 
         scroll_area = QScrollArea()
         self.loans_table = QTableWidget()
-        self.loans_table.setColumnCount(12)
+        self.loans_table.setColumnCount(12) # تعداد ستون‌ها ثابت می‌ماند
         self.loans_table.setHorizontalHeaderLabels([
-            "شناسه", "نوع", "بانک", "مبلغ", "پرداخت‌شده", "سود",
+            "شناسه", "نوع", "عنوان", "مبلغ", "پرداخت‌شده", "سود", # تغییر "بانک" به "عنوان"
             "شروع", "اقساط کل", "اقساط پرداخت", "مبلغ قسط", "ویرایش", "مشاهده اقساط"
         ])
         self.loans_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -1104,6 +1134,14 @@ class FinanceApp(QMainWindow):
 
         tab.setLayout(layout)
         return tab
+
+    def toggle_custom_interval_field(self):
+        """نمایش یا پنهان کردن فیلد وارد کردن فاصله دلخواه"""
+        if self.loan_interval_type_combo.currentText() == "فاصله دلخواه":
+            self.loan_custom_interval_input.setVisible(True)
+        else:
+            self.loan_custom_interval_input.setVisible(False)
+            self.loan_custom_interval_input.clear() # پاک کردن مقدار وقتی مخفی می‌شود
 
     def search_debts(self):
         try:
@@ -3540,21 +3578,54 @@ class FinanceApp(QMainWindow):
             self.debts_current_page += 1
             self.load_debts()
 
+
     def add_loan(self):
         loan_type = "taken" if self.loan_type.currentText() == "وام گرفته‌شده" else "given"
-        bank_name = self.loan_bank.text()
+        loan_title = self.loan_title.text()
         total_amount = self.loan_amount.get_raw_value()
         interest_rate = self.loan_interest.get_raw_value() or 0
         account_id = self.loan_account.currentData()
-        start_date = self.loan_start_date.text()
+        start_date_shamsi = self.loan_start_date.text()
         installments_total = self.loan_installments_total.get_raw_value()
         installments_paid = self.loan_installments_paid.get_raw_value() or 0
         installment_amount = self.loan_installment_amount.get_raw_value()
-        installment_interval = self.loan_installment_interval.get_raw_value() or 30
-        add_to_account = self.loan_add_to_account_checkbox.isChecked() # دریافت وضعیت چک‌باکس
+        
+        # --- اصلاح منطق دریافت نوع فاصله و مقدار آن ---
+        interval_type_text = self.loan_interval_type_combo.currentText()
+        installment_interval_value = 0 # مقدار عددی فاصله (بر حسب روز یا ماه)
 
-        if not bank_name:
-            QMessageBox.warning(self, "خطا", "نام بانک نمی‌تواند خالی باشد!")
+        if interval_type_text == "فاصله دلخواه":
+            installment_interval_value = self.loan_custom_interval_input.get_raw_value()
+            if not installment_interval_value or installment_interval_value <= 0:
+                QMessageBox.warning(self, "خطا", "برای فاصله دلخواه، باید یک عدد مثبت وارد کنید!")
+                return
+        else:
+            # استخراج عدد از رشته (مثلاً "یک" از "هر یک ماه")
+            # از یک دیکشنری برای نگاشت کلمات به اعداد استفاده می‌کنیم تا خطای ValueError کمتر شود
+            word_to_num = {
+                "یک": 1, "دو": 2, "سه": 3, "چهار": 4, "پنج": 5, "شش": 6
+            }
+            parts = interval_type_text.split(" ")
+            if len(parts) >= 2:
+                num_word = parts[1] # "یک", "دو", ...
+                if num_word in word_to_num:
+                    num = word_to_num[num_word]
+                    if "ماه" in interval_type_text:
+                        installment_interval_value = num # تعداد ماه‌ها
+                    elif "سال" in interval_type_text:
+                        installment_interval_value = num * 12 # تبدیل سال به ماه
+                else:
+                    QMessageBox.warning(self, "خطا", "نوع فاصله اقساط نامعتبر است. لطفاً یک گزینه معتبر انتخاب کنید.")
+                    return
+            else:
+                QMessageBox.warning(self, "خطا", "نوع فاصله اقساط نامعتبر است. لطفاً یک گزینه معتبر انتخاب کنید.")
+                return
+        # --- پایان اصلاح منطق دریافت نوع فاصله و مقدار آن ---
+
+        add_to_account = self.loan_add_to_account_checkbox.isChecked()
+
+        if not loan_title:
+            QMessageBox.warning(self, "خطا", "عنوان وام نمی‌تواند خالی باشد!")
             return
         if not total_amount:
             QMessageBox.warning(self, "خطا", "مبلغ وام نمی‌تواند خالی باشد!")
@@ -3568,7 +3639,7 @@ class FinanceApp(QMainWindow):
         if not installment_amount:
             QMessageBox.warning(self, "خطا", "مبلغ قسط نمی‌تواند خالی باشد!")
             return
-        if not is_valid_shamsi_date(start_date):
+        if not is_valid_shamsi_date(start_date_shamsi):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         if installments_paid > installments_total:
@@ -3576,20 +3647,23 @@ class FinanceApp(QMainWindow):
             return
 
         try:
-            date = shamsi_to_gregorian(start_date)
-            if not date:
+            start_date_gregorian = shamsi_to_gregorian(start_date_shamsi)
+            if not start_date_gregorian:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
-            QDate.fromString(date, "yyyy-MM-dd")
+            
+            try:
+                datetime.strptime(start_date_gregorian, "%Y-%m-%d")
+            except ValueError:
+                QMessageBox.warning(self, "خطا", "تاریخ نامعتبر است!")
+                return
 
-            # به‌روزرسانی موجودی حساب فقط اگر چک‌باکس فعال باشد
             if add_to_account:
                 if loan_type == "taken":
                     self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (total_amount, account_id))
-                else:  # given
+                else:
                     self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (total_amount, account_id))
 
-            # ثبت وام با installment_interval
             self.db_manager.execute(
                 """
                 INSERT INTO loans (type, bank_name, total_amount, paid_amount, interest_rate, start_date,
@@ -3597,39 +3671,62 @@ class FinanceApp(QMainWindow):
                                 installment_interval)
                 VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (loan_type, bank_name, total_amount, interest_rate, date, account_id,
-                installments_total, installments_paid, installment_amount, installment_interval)
+                (loan_type, loan_title, total_amount, interest_rate, start_date_gregorian, account_id,
+                installments_total, installments_paid, installment_amount, installment_interval_value)
             )
             loan_id = self.db_manager.cursor.lastrowid
 
-            # تولید اقساط با حفظ روز ثابت
-            start_gregorian = datetime.strptime(date, "%Y-%m-%d")
-            start_jdate = jdatetime.date.fromgregorian(date=start_gregorian)
+            start_jdate = jdatetime.date.fromgregorian(date=datetime.strptime(start_date_gregorian, "%Y-%m-%d"))
+            
+            # --- منطق تولید اقساط بر اساس نوع فاصله (تغییرات جزئی برای وضوح) ---
+            is_custom_interval = (interval_type_text == "فاصله دلخواه")
+
             for i in range(installments_total):
-                due_jdate = start_jdate + jdatetime.timedelta(days=installment_interval * (i + 1))
+                if is_custom_interval:
+                    due_jdate = start_jdate + jdatetime.timedelta(days=installment_interval_value * (i + 1))
+                else:
+                    months_to_add = installment_interval_value * (i + 1)
+                    current_year = start_jdate.year
+                    current_month = start_jdate.month
+                    target_day = start_jdate.day
+
+                    new_year = current_year
+                    new_month = current_month + months_to_add
+                    
+                    while new_month > 12:
+                        new_month -= 12
+                        new_year += 1
+                    
+                    try:
+                        due_jdate = jdatetime.date(new_year, new_month, target_day)
+                    except ValueError:
+                        days_in_target_month = jdatetime.date(new_year, new_month, 1).days_in_month
+                        due_jdate = jdatetime.date(new_year, new_month, days_in_target_month)
+
                 due_date_shamsi = due_jdate.strftime("%Y/%m/%d")
                 due_date_gregorian = shamsi_to_gregorian(due_date_shamsi)
                 is_paid = 1 if i < installments_paid else 0
+                
                 self.db_manager.execute(
                     "INSERT INTO loan_installments (loan_id, amount, due_date, is_paid) VALUES (?, ?, ?, ?)",
                     (loan_id, installment_amount, due_date_gregorian, is_paid)
                 )
 
             self.db_manager.commit()
-            self.loan_bank.clear()
+            self.loan_title.clear()
             self.loan_amount.clear()
             self.loan_interest.clear()
             self.loan_start_date.clear()
             self.loan_installments_total.clear()
             self.loan_installments_paid.clear()
             self.loan_installment_amount.clear()
-            self.loan_installment_interval.clear()
+            self.loan_custom_interval_input.clear()
             self.load_loans()
             self.load_accounts()
             QMessageBox.information(self, "موفق", "وام با موفقیت ثبت شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-            self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
+            self.db_manager.rollback()
 
 
     def edit_loan(self, loan_id):
@@ -3652,14 +3749,19 @@ class FinanceApp(QMainWindow):
             dialog = QDialog(self)
             dialog.setWindowTitle("ویرایش وام")
             layout = QFormLayout()
+            
             edit_type = QComboBox()
             edit_type.addItems(["وام گرفته‌شده", "وام داده‌شده"])
             edit_type.setCurrentText("وام گرفته‌شده" if loan_type == "taken" else "وام داده‌شده")
-            edit_bank = QLineEdit(bank_name)
+            
+            edit_title = QLineEdit(bank_name) # تغییر به عنوان وام
+            
             edit_amount = NumberInput()
             edit_amount.setText(str(total_amount) if total_amount else "")
+            
             edit_interest = NumberInput()
             edit_interest.setText(str(interest_rate) if interest_rate else "")
+            
             edit_account = QComboBox()
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
@@ -3668,64 +3770,129 @@ class FinanceApp(QMainWindow):
                 edit_account.addItem(display_text, acc_id)
             if account_id:
                 edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+            
             edit_start_date = QLineEdit(gregorian_to_shamsi(start_date) if start_date else "")
             edit_start_date.setReadOnly(True)
             edit_start_date.setPlaceholderText("1404/02/13")
             edit_start_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_start_date)
+            
             edit_installments_total = NumberInput()
             edit_installments_total.setText(str(installments_total) if installments_total else "")
+            
             edit_installments_paid = NumberInput()
             edit_installments_paid.setText(str(installments_paid) if installments_paid else "")
+            
             edit_installment_amount = NumberInput()
             edit_installment_amount.setText(str(installment_amount) if installment_amount else "")
-            edit_installment_interval = NumberInput()
-            edit_installment_interval.setText(str(installment_interval) if installment_interval else "30")
+            
+            # --- مدیریت فیلدهای فاصله اقساط در ویرایش ---
+            edit_interval_type_combo = QComboBox()
+            edit_interval_type_combo.addItems([
+                "هر یک ماه", "هر دو ماه", "هر سه ماه", "هر چهار ماه",
+                "هر پنج ماه", "هر شش ماه", "هر یک سال", "فاصله دلخواه"
+            ])
+            
+            edit_custom_interval_input = NumberInput()
+            edit_custom_interval_input.setPlaceholderText("فاصله دلخواه (بر حسب روز)")
+
+            # تعیین مقدار اولیه کامبوباکس و فیلد دلخواه
+            if installment_interval in [1, 2, 3, 4, 5, 6, 12]: # اگر یکی از فواصل استاندارد ماهانه/سالانه باشد
+                if installment_interval == 12: # برای هر یک سال
+                    edit_interval_type_combo.setCurrentText("هر یک سال")
+                else: # برای هر X ماه
+                    edit_interval_type_combo.setCurrentText(f"هر {installment_interval} ماه")
+                edit_custom_interval_input.setVisible(False)
+            else: # اگر عدد دیگری باشد، فرض می‌کنیم فاصله دلخواه است
+                edit_interval_type_combo.setCurrentText("فاصله دلخواه")
+                edit_custom_interval_input.setText(str(installment_interval))
+                edit_custom_interval_input.setVisible(True)
+
+            def toggle_edit_custom_interval_field(state):
+                if edit_interval_type_combo.currentText() == "فاصله دلخواه":
+                    edit_custom_interval_input.setVisible(True)
+                else:
+                    edit_custom_interval_input.setVisible(False)
+                    edit_custom_interval_input.clear()
+
+            edit_interval_type_combo.currentTextChanged.connect(toggle_edit_custom_interval_field)
+            # وضعیت اولیه فیلد را بر اساس انتخاب کنونی تنظیم کنید
+            toggle_edit_custom_interval_field(edit_interval_type_combo.currentText())
 
             # چک‌باکس "مبلغ وام به حساب اضافه شود؟" برای ویرایش
-            # وضعیت این چک‌باکس باید بر اساس اینکه آیا در زمان ثبت وام، مبلغ به حساب اضافه شده بود یا نه، تعیین شود.
-            # برای این کار، نیاز به یک ستون جدید در جدول loans داریم که این وضعیت را ذخیره کند.
-            # فعلاً، به دلیل نبود این ستون، می‌توانیم آن را به‌صورت پیش‌فرض فعال در نظر بگیریم
-            # یا اگر logic دیگری برای تعیین آن دارید، اعمال کنید.
-            # برای سادگی، فعلاً آن را نمایش نمی‌دهیم یا همیشه فعال در نظر می‌گیریم تا زمانی که ستون مربوطه اضافه شود.
-            # اگر می‌خواهید این چک‌باکس در ویرایش نیز قابل تنظیم باشد، باید ستون `is_added_to_account` را به جدول `loans` اضافه کنید.
-            # فرض می‌کنیم در اینجا فعلاً نیازی به این کنترل در ویرایش نداریم و موجودی از طریق اقساط مدیریت می‌شود.
-            # اگر نیاز به این کنترل در ویرایش بود، باید `ALTER TABLE` برای `loans` در `init_db` اضافه شود.
+            # توجه: اینجا ما ستون `is_added_to_account` در دیتابیس نداریم
+            # بنابراین، وضعیت این چک‌باکس در ویرایش، فقط حالت فعلی را نمایش می‌دهد
+            # و نمی‌تواند وضعیت ذخیره شده قبلی را بازتاب دهد.
+            # برای حفظ این وضعیت، باید یک ستون جدید به جدول loans اضافه شود.
+            edit_add_to_account_checkbox = QCheckBox("مبلغ وام به حساب اضافه/کم شود؟")
+            edit_add_to_account_checkbox.setChecked(True) # فعلا به صورت پیش‌فرض فعال است.
 
 
             save_btn = QPushButton("ذخیره")
-            # در save_loan، پارامتر add_to_account را نیز ارسال می‌کنیم.
-            # چون در ویرایش این چک‌باکس را اضافه نکردیم (طبق کامنت بالا)، فعلاً مقدار True را به صورت پیش‌فرض ارسال می‌کنیم.
-            # اگر چک‌باکس را در edit_loan اضافه کردید، باید مقدار آن را از edit_loan_add_to_account_checkbox.isChecked() بگیرید.
             save_btn.clicked.connect(lambda: self.save_loan(
-                loan_id, edit_type.currentText(), edit_bank.text(), edit_amount.get_raw_value(),
-                edit_interest.get_raw_value() or 0, edit_account.currentData(), edit_start_date.text(),
+                loan_id, edit_type.currentText(), edit_title.text(), # تغییر به عنوان وام
+                edit_amount.get_raw_value(), edit_interest.get_raw_value() or 0,
+                edit_account.currentData(), edit_start_date.text(),
                 edit_installments_total.get_raw_value(), edit_installments_paid.get_raw_value() or 0,
-                edit_installment_amount.get_raw_value(), edit_installment_interval.get_raw_value() or 30, dialog,
-                True # فرض می‌کنیم همیشه True است تا زمانی که چک‌باکس در ویرایش اضافه شود.
+                edit_installment_amount.get_raw_value(),
+                # ارسال مقدار عددی فاصله و نوع آن به save_loan
+                self.get_loan_interval_value(edit_interval_type_combo.currentText(), edit_custom_interval_input.get_raw_value()),
+                dialog,
+                edit_add_to_account_checkbox.isChecked() # وضعیت چک‌باکس ویرایش
             ))
 
             layout.addRow("نوع وام:", edit_type)
-            layout.addRow("نام بانک:", edit_bank)
+            layout.addRow("عنوان وام:", edit_title) # تغییر لیبل
             layout.addRow("مبلغ کل:", edit_amount)
             layout.addRow("نرخ سود (%):", edit_interest)
             layout.addRow("حساب مرتبط:", edit_account)
+            layout.addRow("", edit_add_to_account_checkbox) # اضافه کردن چک‌باکس ویرایش
             layout.addRow("تاریخ شروع (شمسی):", edit_start_date)
             layout.addRow("تعداد اقساط کل:", edit_installments_total)
             layout.addRow("تعداد اقساط پرداخت‌شده:", edit_installments_paid)
             layout.addRow("مبلغ هر قسط:", edit_installment_amount)
-            layout.addRow("فاصله اقساط (روز):", edit_installment_interval)
+            layout.addRow("فاصله اقساط:", edit_interval_type_combo) # کامبوباکس فاصله
+            layout.addRow("", edit_custom_interval_input) # فیلد فاصله دلخواه
             layout.addRow(save_btn)
             dialog.setLayout(layout)
             dialog.resize(400, 400)
             dialog.exec()
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-            self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
+            self.db_manager.rollback()
 
-    def save_loan(self, loan_id, type_text, bank_name, total_amount, interest_rate, account_id, start_date,
-              installments_total, installments_paid, installment_amount, installment_interval, dialog, add_to_account_on_edit):
-        if not bank_name:
-            QMessageBox.warning(self, "خطا", "نام بانک نمی‌تواند خالی باشد!")
+    def get_loan_interval_value(self, interval_type_text, custom_value):
+        """تابعی کمکی برای برگرداندن مقدار عددی فاصله اقساط بر اساس انتخاب کاربر
+           (این متد در edit_loan فراخوانی می‌شود)
+        """
+        if interval_type_text == "فاصله دلخواه":
+            if custom_value is None or custom_value <= 0:
+                QMessageBox.warning(self, "خطا", "برای فاصله دلخواه، باید یک عدد مثبت وارد کنید!")
+                return None # برگرداندن None برای نشان دادن خطا
+            return custom_value
+        else:
+            word_to_num = {
+                "یک": 1, "دو": 2, "سه": 3, "چهار": 4, "پنج": 5, "شش": 6
+            }
+            parts = interval_type_text.split(" ")
+            if len(parts) >= 2:
+                num_word = parts[1]
+                if num_word in word_to_num:
+                    num = word_to_num[num_word]
+                    if "ماه" in interval_type_text:
+                        return num
+                    elif "سال" in interval_type_text:
+                        return num * 12
+            # اگر هیچ یک از موارد بالا نبود، به مقدار پیش‌فرض برمی‌گردیم یا خطا می‌دهیم
+            QMessageBox.warning(self, "خطا", "خطا در تعیین نوع فاصله اقساط. لطفاً گزینه معتبری را انتخاب کنید.")
+            return None
+
+
+    def save_loan(self, loan_id, type_text, loan_title, total_amount, interest_rate, account_id, start_date_shamsi,
+              installments_total, installments_paid, installment_amount, installment_interval_value, dialog, add_to_account_on_edit):
+        
+        # اعتبارسنجی‌ها
+        if not loan_title:
+            QMessageBox.warning(self, "خطا", "عنوان وام نمی‌تواند خالی باشد!")
             return
         if not total_amount:
             QMessageBox.warning(self, "خطا", "مبلغ وام نمی‌تواند خالی باشد!")
@@ -3739,21 +3906,30 @@ class FinanceApp(QMainWindow):
         if not installment_amount:
             QMessageBox.warning(self, "خطا", "مبلغ قسط نمی‌تواند خالی باشد!")
             return
-        if not is_valid_shamsi_date(start_date):
+        if not is_valid_shamsi_date(start_date_shamsi):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         if installments_paid > installments_total:
             QMessageBox.warning(self, "خطا", "تعداد اقساط پرداخت‌شده نمی‌تواند بیشتر از کل اقساط باشد!")
             return
+        
+        # برای فاصله دلخواه، باید مقدار مثبت باشد
+        # در save_loan، installment_interval_value مستقیماً از get_loan_interval_value می‌آید.
+        # پس فقط باید چک کنیم که مقدار None یا صفر نباشد.
+        # این بخش را تغییر نمی‌دهیم چون get_loan_interval_value قبلاً آن را بررسی کرده است.
+        # اگر در edit_loan بخواهیم دوباره این بررسی را داشته باشیم، باید در get_loan_interval_value آن را اضافه کنیم.
+        if (self.loan_interval_type_combo.currentText() == "فاصله دلخواه" and 
+            (installment_interval_value is None or installment_interval_value <= 0)):
+             QMessageBox.warning(self, "خطا", "برای فاصله دلخواه، باید یک عدد مثبت وارد کنید!")
+             return
 
         try:
-            date = shamsi_to_gregorian(start_date)
-            if not date:
+            start_date_gregorian = shamsi_to_gregorian(start_date_shamsi)
+            if not start_date_gregorian:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
             loan_type = "taken" if type_text == "وام گرفته‌شده" else "given"
 
-            # دریافت اطلاعات وام قبلی
             self.db_manager.execute("SELECT type, total_amount, account_id FROM loans WHERE id = ?", (loan_id,))
             old_loan = self.db_manager.fetchone()
             if not old_loan:
@@ -3762,34 +3938,18 @@ class FinanceApp(QMainWindow):
                 return
             old_type, old_total_amount, old_account_id = old_loan
 
-            # بازگرداندن اثر وام قبلی بر موجودی حساب فقط اگر قبلاً اضافه شده بود
-            # در اینجا فرض می‌کنیم که اگر مبلغ وام در ابتدا به حساب اضافه شده باشد، باید در ویرایش هم مدیریت شود.
-            # این نیاز به یک ستون جدید در جدول loans دارد تا وضعیت اولیه را ذخیره کند.
-            # فعلاً، اگر در زمان ایجاد وام، چک‌باکس فعال بود، فرض می‌کنیم اثرش روی حساب بوده و باید خنثی شود.
-            # برای ساده‌سازی فعلی، فرض می‌کنیم هر بار ویرایش، اثر را خنثی و مجددا اعمال می‌کند.
-            # اگر نیاز به رفتار دقیق‌تر بود، ستون is_initial_amount_added_to_account INTEGER DEFAULT 1
-            # باید به جدول loans اضافه شود و هنگام add_loan مقداردهی شود.
-            # سپس در save_loan بر اساس آن ستون عمل شود.
-
-            # فرض: اگر old_account_id وجود داشت، یعنی قبلاً به حساب اضافه شده بود.
-            # (این فرض ممکن است در همه سناریوها دقیق نباشد و راه حل بهتر، اضافه کردن یک ستون is_amount_affected_account باشد)
-            if old_account_id: # اگر وامی قبلا به حسابی مرتبط بوده است
-                 if old_type == "taken": # اگر وام گرفته شده بود، مبلغش اضافه شده بود، حالا کم کن
+            if old_account_id:
+                 if old_type == "taken":
                      self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_total_amount, old_account_id))
-                 else: # اگر وام داده شده بود، مبلغش کم شده بود، حالا اضافه کن
+                 else:
                      self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_total_amount, old_account_id))
 
-
-            # اعمال اثر وام جدید فقط اگر add_to_account_on_edit (که از چک‌باکس گرفته می‌شود) فعال باشد.
-            # فعلاً add_to_account_on_edit را True در نظر گرفتیم.
             if add_to_account_on_edit:
                 if loan_type == "taken":
                     self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (total_amount, account_id))
                 else:
                     self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (total_amount, account_id))
 
-
-            # به‌روزرسانی وام با installment_interval
             self.db_manager.execute(
                 """
                 UPDATE loans SET type = ?, bank_name = ?, total_amount = ?, interest_rate = ?,
@@ -3797,21 +3957,46 @@ class FinanceApp(QMainWindow):
                                 installments_paid = ?, installment_amount = ?, installment_interval = ?
                 WHERE id = ?
                 """,
-                (loan_type, bank_name, total_amount, interest_rate, date, account_id,
-                installments_total, installments_paid, installment_amount, installment_interval, loan_id)
+                (loan_type, loan_title, total_amount, interest_rate, start_date_gregorian, account_id,
+                installments_total, installments_paid, installment_amount, installment_interval_value, loan_id)
             )
 
-            # حذف اقساط قبلی
             self.db_manager.execute("DELETE FROM loan_installments WHERE loan_id = ?", (loan_id,))
 
-            # بازسازی اقساط
-            start_gregorian = datetime.strptime(date, "%Y-%m-%d")
-            start_jdate = jdatetime.date.fromgregorian(date=start_gregorian)
+            start_jdate = jdatetime.date.fromgregorian(date=datetime.strptime(start_date_gregorian, "%Y-%m-%d"))
+            
+            # --- منطق بازسازی اقساط بر اساس نوع فاصله (تغییرات جزئی برای وضوح) ---
+            # در save_loan، installment_interval_value از قبل محاسبه شده و به عنوان یک عدد ارسال شده است.
+            # ما نیاز به تعیین اینکه آیا این عدد نشان‌دهنده ماه است یا روز داریم.
+            # اگر 1، 2، 3، 4، 5، 6، 12 باشد، فرض می‌کنیم ماه است. در غیر این صورت، روز است.
+            is_custom_interval = (installment_interval_value not in [1, 2, 3, 4, 5, 6, 12])
+
             for i in range(installments_total):
-                due_jdate = start_jdate + jdatetime.timedelta(days=installment_interval * (i + 1))
+                if is_custom_interval:
+                    due_jdate = start_jdate + jdatetime.timedelta(days=installment_interval_value * (i + 1))
+                else:
+                    months_to_add = installment_interval_value * (i + 1)
+                    current_year = start_jdate.year
+                    current_month = start_jdate.month
+                    target_day = start_jdate.day
+
+                    new_year = current_year
+                    new_month = current_month + months_to_add
+                    
+                    while new_month > 12:
+                        new_month -= 12
+                        new_year += 1
+                    
+                    try:
+                        due_jdate = jdatetime.date(new_year, new_month, target_day)
+                    except ValueError:
+                        days_in_target_month = jdatetime.date(new_year, new_month, 1).days_in_month
+                        due_jdate = jdatetime.date(new_year, new_month, days_in_target_month)
+
                 due_date_shamsi = due_jdate.strftime("%Y/%m/%d")
                 due_date_gregorian = shamsi_to_gregorian(due_date_shamsi)
                 is_paid = 1 if i < installments_paid else 0
+                
                 self.db_manager.execute(
                     "INSERT INTO loan_installments (loan_id, amount, due_date, is_paid) VALUES (?, ?, ?, ?)",
                     (loan_id, installment_amount, due_date_gregorian, is_paid)
@@ -3824,7 +4009,7 @@ class FinanceApp(QMainWindow):
             QMessageBox.information(self, "موفق", "وام با موفقیت ویرایش شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-            self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
+            self.db_manager.rollback()
 
     def load_loans(self):
         try:
