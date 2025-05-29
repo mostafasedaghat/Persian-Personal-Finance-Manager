@@ -719,7 +719,7 @@ class FinanceApp(QMainWindow):
         # فرم انتقال پول بین حساب‌ها
         transfer_form = QFormLayout()
         transfer_label = QLabel("انتقال پول بین حساب‌ها")
-        transfer_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        transfer_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFF;")
         self.transfer_from_account = QComboBox()
         self.transfer_to_account = QComboBox()
         self.transfer_amount = NumberInput()
@@ -741,7 +741,7 @@ class FinanceApp(QMainWindow):
         # فرم جستجو و گزارش‌گیری
         search_form = QFormLayout()
         search_label = QLabel("جستجو و گزارش‌گیری تراکنش‌ها")
-        search_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        search_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFF;")
         self.transaction_search_type = QComboBox()
         self.transaction_search_type.addItems(["همه", "برداشت", "واریز", "انتقال"])
         self.transaction_search_person = QComboBox()
@@ -980,7 +980,7 @@ class FinanceApp(QMainWindow):
         # فرم جستجو و گزارش‌گیری
         search_form = QFormLayout()
         search_label = QLabel("جستجو و گزارش‌گیری بدهی/طلب")
-        search_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        search_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFF;")
         self.debt_search_type = QComboBox()
         self.debt_search_type.addItems(["همه", "بدهی", "طلب"])
         self.debt_search_person = QComboBox()
