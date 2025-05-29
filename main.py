@@ -1,6 +1,3 @@
-from database import DatabaseManager
-from login_dialog import LoginDialog
-from change_password_dialog import ChangePasswordDialog
 import sys
 import locale
 import re
@@ -15,11 +12,12 @@ import sqlite3
 import jdatetime
 from datetime import datetime, timedelta
 import pandas as pd
-from reportlab.lib.pagesizes import A4
+import reportlab.lib.pagesizes as pagesizes 
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.pdfmetrics import registerFont, getRegisteredFontNames
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import matplotlib.pyplot as plt
 from io import BytesIO
@@ -27,7 +25,12 @@ import os
 import bcrypt
 import dropbox
 from dropbox.exceptions import ApiError
+from bidi.algorithm import get_display 
+from arabic_reshaper import reshape
 
+from database import DatabaseManager
+from login_dialog import LoginDialog
+from change_password_dialog import ChangePasswordDialog
 
 # تنظیم locale برای جداکننده اعداد
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
@@ -267,7 +270,23 @@ class FinanceApp(QMainWindow):
         self.setGeometry(100, 100, 1200, 900)
         self.setWindowIcon(QIcon("assets/icon.ico"))
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        QApplication.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
+        try:
+            # فقط یک بار فونت را ثبت کنید
+            if 'Vazir' not in getRegisteredFontNames(): # استفاده از getRegisteredFontNames
+                font_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'Vazir.ttf') 
+                if not os.path.exists(font_path):
+                    font_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'assets', 'Vazir.ttf')
+                
+                if os.path.exists(font_path):
+                    registerFont(TTFont('Vazir', font_path)) # استفاده از registerFont
+                else:
+                    QMessageBox.critical(self, "خطا", "فایل فونت Vazir.ttf یافت نشد! لطفا آن را در کنار فایل اجرایی یا پوشه assets قرار دهید.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "خطا", f"خطا در بارگذاری فونت: {e}")
+        
         # بارگذاری استایل‌ها
         with open('styles.qss', 'r', encoding='utf-8') as f:
             self.setStyleSheet(f.read())
@@ -1922,10 +1941,29 @@ class FinanceApp(QMainWindow):
 
     def generate_export(self, data, report_type, format_type, dialog):
         try:
-            # تولید نام فایل با تاریخ و زمان
+            base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
+            reports_folder = os.path.join(base_path, "reports")
+            os.makedirs(reports_folder, exist_ok=True)
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_prefix = f"{report_type}_report_{timestamp}"
 
+            output_extension = ""
+            if format_type == "excel":
+                output_extension = "xlsx"
+            elif format_type == "csv":
+                output_extension = "csv"
+            elif format_type == "pdf":
+                output_extension = "pdf"
+            else:
+                QMessageBox.warning(self, "خطا", "فرمت خروجی نامعتبر است.")
+                return
+
+            output_filename = f"{file_prefix}.{output_extension}"
+            output_path = os.path.join(reports_folder, output_filename)
+
+            # ... بخش تولید DataFrame (بدون تغییر عمده در این مرحله)
+            df = pd.DataFrame() # تعریف اولیه برای جلوگیری از خطای UnboundLocalError
             if report_type == "transactions":
                 df = pd.DataFrame(
                     data,
@@ -1933,14 +1971,28 @@ class FinanceApp(QMainWindow):
                 )
                 df["تاریخ"] = df["تاریخ"].apply(gregorian_to_shamsi)
                 df["مبلغ"] = df["مبلغ"].apply(format_number)
+                
             elif report_type == "debts":
+                processed_data = []
+                for row_data in data:
+                    processed_row = list(row_data)
+                    
+                    is_paid_val = processed_row[5]
+                    processed_row[5] = "پرداخت شده" if is_paid_val == 1 else "در جریان"
+
+                    is_credit_val = processed_row[7]
+                    processed_row[7] = "طلب" if is_credit_val == 1 else "بدهی"
+                    
+                    processed_data.append(processed_row)
+
                 df = pd.DataFrame(
-                    data,
-                    columns=["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "نوع"]
+                    processed_data,
+                    columns=["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "نوع", "توضیحات"]
                 )
                 df["سررسید"] = df["سررسید"].apply(lambda x: gregorian_to_shamsi(x) if x else "-")
                 df["مبلغ"] = df["مبلغ"].apply(format_number)
                 df["پرداخت شده"] = df["پرداخت شده"].apply(format_number)
+
             elif report_type == "cost_income":
                 df = pd.DataFrame(
                     data,
@@ -1951,56 +2003,149 @@ class FinanceApp(QMainWindow):
             elif report_type == "monthly":
                 df = pd.DataFrame(
                     data,
-                    columns=["ماه", "هزینه", "درآمد", "تفاوت", "اقساط پرداختی", "بدهی", "طلب"]
+                    columns=["ماه", "هزینه", "درآمد", "تفاوت"]
                 )
-                df[["هزینه", "درآمد", "تفاوت", "اقساط پرداختی", "بدهی", "طلب"]] = df[
-                    ["هزینه", "درآمد", "تفاوت", "اقساط پرداختی", "بدهی", "طلب"]
-                ].apply(lambda x: x.apply(format_number))
+                for col in ["هزینه", "درآمد", "تفاوت"]:
+                    df[col] = df[col].apply(format_number)
+
             elif report_type == "person":
                 df = pd.DataFrame(
                     data,
-                    columns=["نوع", "تاریخ", "حساب", "دسته‌بندی", "مبلغ", "توضیحات", "وضعیت"]
+                    columns=["دسته‌بندی", "تاریخ", "حساب", "مبلغ", "توضیحات"]
                 )
                 df["تاریخ"] = df["تاریخ"].apply(lambda x: gregorian_to_shamsi(x) if x != "-" else "-")
                 df["مبلغ"] = df["مبلغ"].apply(lambda x: format_number(x) if isinstance(x, (int, float)) else x)
             elif report_type == "general":
                 df = pd.DataFrame(data, columns=["معیار", "مقدار"])
+            # --- پایان بخش تولید DataFrame ---
 
             if format_type == "excel":
-                output_path = f"{file_prefix}.xlsx"
                 df.to_excel(output_path, index=False, engine='openpyxl')
-                QMessageBox.information(self, "موفق", f"فایل اکسل در {output_path} ذخیره شد!")
+                QMessageBox.information(self, "موفق", f"فایل اکسل با موفقیت در {output_path} ذخیره شد!")
             elif format_type == "csv":
-                output_path = f"{file_prefix}.csv"
                 df.to_csv(output_path, index=False, encoding='utf-8-sig')
-                QMessageBox.information(self, "موفق", f"فایل CSV در {output_path} ذخیره شد!")
+                QMessageBox.information(self, "موفق", f"فایل CSV با موفقیت در {output_path} ذخیره شد!")
             elif format_type == "pdf":
-                output_path = f"{file_prefix}.pdf"
-                pdfmetrics.registerFont(TTFont('Vazir', 'Vazir.ttf'))
-                doc = SimpleDocTemplate(output_path, pagesize=A4)
+                doc = SimpleDocTemplate(output_path, pagesize=pagesizes.A4)
                 elements = []
                 styles = getSampleStyleSheet()
+
                 persian_style = ParagraphStyle(
-                    name='Persian',
+                    name='PersianTableStyle',
                     parent=styles['Normal'],
                     fontName='Vazir',
-                    fontSize=12,
-                    alignment=1,
-                    wordWrap='RTL'
+                    fontSize=10, # سایز فونت مناسب برای جداول
+                    alignment=4, # ALIGN_RIGHT for RTL text
+                    wordWrap='RTL',
                 )
+                
+                table_data = []
+                header_row = [Paragraph(get_display(reshape(str(col))), persian_style) for col in df.columns.tolist()]
+                table_data.append(header_row)
 
-                table_data = [df.columns.tolist()] + df.values.tolist()
+                for row_idx, row_data in df.iterrows():
+                    new_row = []
+                    for item in row_data.values:
+                        text_content = str(item) if item is not None else "-"
+                        reshaped_text = reshape(text_content)
+                        displayed_text = get_display(reshaped_text)
+                        new_row.append(Paragraph(displayed_text, persian_style))
+                    table_data.append(new_row)
+
                 table = Table(table_data)
+                
+                # --- تنظیم عرض ستون‌ها بر اساس نوع گزارش ---
+                # A4_WIDTH = 595.27 points
+                # Left/Right margin default to 1 inch (72 points each), so usable width = 595.27 - 2*72 = 451.27
+                page_width = pagesizes.A4[0]
+                margin = 72
+                usable_width = page_width - (2 * margin)
+
+                col_widths = []
+                if report_type == "transactions":
+                    # شناسه، تاریخ، حساب، شخص، دسته‌بندی، مبلغ، توضیحات، نوع
+                    # مبلغ و توضیحات نیاز به فضای بیشتر دارند
+                    col_widths = [
+                        usable_width * 0.12, # شناسه (5%)
+                        usable_width * 0.15, # تاریخ (12%)
+                        usable_width * 0.15, # حساب (15%)
+                        usable_width * 0.12, # شخص (12%)
+                        usable_width * 0.15, # دسته‌بندی (15%)
+                        usable_width * 0.15, # مبلغ (15%) - افزایش پهنا
+                        usable_width * 0.20, # توضیحات (20%) - افزایش پهنا
+                        usable_width * 0.12  # نوع (6%)
+                    ]
+                elif report_type == "debts":
+                    # شناسه، شخص، مبلغ، پرداخت شده، سررسید، وضعیت، حساب، نوع، توضیحات
+                    col_widths = [
+                        usable_width * 0.12,  # شناسه
+                        usable_width * 0.12,  # شخص
+                        usable_width * 0.15,  # مبلغ (افزایش بیشتر)
+                        usable_width * 0.15,  # پرداخت شده (افزایش بیشتر)
+                        usable_width * 0.15,  # سررسید
+                        usable_width * 0.12,  # وضعیت
+                        usable_width * 0.12,  # حساب
+                        usable_width * 0.08,  # نوع
+                        usable_width * 0.15   # توضیحات (باز هم بررسی کنید که این نسبت‌ها جمعشان 1.0 شود)
+                    ]
+                elif report_type == "cost_income":
+                    # نوع، مبلغ، تاریخ، حساب، شخص، توضیحات
+                    col_widths = [
+                        usable_width * 0.15, # نوع
+                        usable_width * 0.15, # مبلغ (افزایش)
+                        usable_width * 0.12, # تاریخ
+                        usable_width * 0.15, # حساب
+                        usable_width * 0.15, # شخص
+                        usable_width * 0.28  # توضیحات (افزایش)
+                    ]
+                elif report_type == "monthly":
+                    # ماه، هزینه، درآمد، تفاوت
+                    col_widths = [
+                        usable_width * 0.15, # ماه
+                        usable_width * 0.28, # هزینه (افزایش)
+                        usable_width * 0.28, # درآمد (افزایش)
+                        usable_width * 0.29  # تفاوت (افزایش)
+                    ]
+                elif report_type == "person":
+                    # دسته‌بندی، تاریخ، حساب، مبلغ، توضیحات
+                    col_widths = [
+                        usable_width * 0.18, # دسته‌بندی
+                        usable_width * 0.12, # تاریخ
+                        usable_width * 0.18, # حساب
+                        usable_width * 0.15, # مبلغ (افزایش)
+                        usable_width * 0.37  # توضیحات (افزایش)
+                    ]
+                elif report_type == "general":
+                    # معیار، مقدار
+                    col_widths = [
+                        usable_width * 0.40, # معیار
+                        usable_width * 0.60  # مقدار (افزایش)
+                    ]
+                else:
+                    # به عنوان بازگشت، عرض مساوی
+                    num_columns = len(df.columns)
+                    col_widths = [usable_width / num_columns] * num_columns
+
+                table._argW = col_widths 
+                # --- پایان تنظیم عرض ستون‌ها ---
+
                 table.setStyle(TableStyle([
-                    ('FONT', (0, 0), (-1, -1), 'Vazir'),
-                    ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Vazir'),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Vazir'),
+                    ('ALIGN', (0, 0), (-1, -1), 'RIGHT'), # تراز کلی سلول‌ها به راست
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                     ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#CCCCCC')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                    ('LEFTPADDING', (0,0), (-1,-1), 6),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                    ('TOPPADDING', (0,0), (-1,-1), 6),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 6),
                 ]))
+                
                 elements.append(table)
                 doc.build(elements)
-                QMessageBox.information(self, "موفق", f"فایل PDF در {output_path} ذخیره شد!")
+                QMessageBox.information(self, "موفق", f"فایل PDF با موفقیت در {output_path} ذخیره شد!")
 
             dialog.accept()
         except Exception as e:
