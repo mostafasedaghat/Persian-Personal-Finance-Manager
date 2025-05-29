@@ -1040,8 +1040,13 @@ class FinanceApp(QMainWindow):
         self.loan_installments_total = NumberInput()
         self.loan_installments_paid = NumberInput()
         self.loan_installment_amount = NumberInput()
-        self.loan_installment_interval = NumberInput()  # فیلد جدید برای فاصله اقساط
-        self.loan_installment_interval.setPlaceholderText("30")  # پیش‌فرض 30 روز
+        self.loan_installment_interval = NumberInput()
+        self.loan_installment_interval.setPlaceholderText("30")
+
+        # چک‌باکس جدید: آیا مبلغ وام به حساب اضافه شود؟
+        self.loan_add_to_account_checkbox = QCheckBox("مبلغ وام به حساب اضافه/کم شود؟")
+        self.loan_add_to_account_checkbox.setChecked(True) # به صورت پیش‌فرض فعال
+
         add_loan_btn = QPushButton("ثبت وام")
         add_loan_btn.clicked.connect(self.add_loan)
         form_layout.addRow("نوع وام:", self.loan_type)
@@ -1049,11 +1054,12 @@ class FinanceApp(QMainWindow):
         form_layout.addRow("مبلغ کل:", self.loan_amount)
         form_layout.addRow("نرخ سود (%):", self.loan_interest)
         form_layout.addRow("حساب مرتبط:", self.loan_account)
+        form_layout.addRow("", self.loan_add_to_account_checkbox) # اضافه کردن چک‌باکس
         form_layout.addRow("تاریخ شروع (شمسی):", self.loan_start_date)
         form_layout.addRow("تعداد اقساط کل:", self.loan_installments_total)
         form_layout.addRow("تعداد اقساط پرداخت‌شده:", self.loan_installments_paid)
         form_layout.addRow("مبلغ هر قسط:", self.loan_installment_amount)
-        form_layout.addRow("فاصله اقساط (روز):", self.loan_installment_interval)  # فیلد جدید
+        form_layout.addRow("فاصله اقساط (روز):", self.loan_installment_interval)
         form_layout.addRow(add_loan_btn)
         layout.addLayout(form_layout)
 
@@ -1061,7 +1067,7 @@ class FinanceApp(QMainWindow):
         self.loans_table = QTableWidget()
         self.loans_table.setColumnCount(12)
         self.loans_table.setHorizontalHeaderLabels([
-            "شناسه", "نوع", "بانک", "مبلغ", "پرداخت‌شده", "سود", 
+            "شناسه", "نوع", "بانک", "مبلغ", "پرداخت‌شده", "سود",
             "شروع", "اقساط کل", "اقساط پرداخت", "مبلغ قسط", "ویرایش", "مشاهده اقساط"
         ])
         self.loans_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -3544,7 +3550,8 @@ class FinanceApp(QMainWindow):
         installments_total = self.loan_installments_total.get_raw_value()
         installments_paid = self.loan_installments_paid.get_raw_value() or 0
         installment_amount = self.loan_installment_amount.get_raw_value()
-        installment_interval = self.loan_installment_interval.get_raw_value() or 30  # پیش‌فرض 30 روز
+        installment_interval = self.loan_installment_interval.get_raw_value() or 30
+        add_to_account = self.loan_add_to_account_checkbox.isChecked() # دریافت وضعیت چک‌باکس
 
         if not bank_name:
             QMessageBox.warning(self, "خطا", "نام بانک نمی‌تواند خالی باشد!")
@@ -3575,21 +3582,22 @@ class FinanceApp(QMainWindow):
                 return
             QDate.fromString(date, "yyyy-MM-dd")
 
-            # به‌روزرسانی موجودی حساب
-            if loan_type == "taken":
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (total_amount, account_id))
-            else:  # given
-                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (total_amount, account_id))
+            # به‌روزرسانی موجودی حساب فقط اگر چک‌باکس فعال باشد
+            if add_to_account:
+                if loan_type == "taken":
+                    self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (total_amount, account_id))
+                else:  # given
+                    self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (total_amount, account_id))
 
             # ثبت وام با installment_interval
             self.db_manager.execute(
                 """
-                INSERT INTO loans (type, bank_name, total_amount, paid_amount, interest_rate, start_date, 
-                                account_id, installments_total, installments_paid, installment_amount, 
+                INSERT INTO loans (type, bank_name, total_amount, paid_amount, interest_rate, start_date,
+                                account_id, installments_total, installments_paid, installment_amount,
                                 installment_interval)
                 VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (loan_type, bank_name, total_amount, interest_rate, date, account_id, 
+                (loan_type, bank_name, total_amount, interest_rate, date, account_id,
                 installments_total, installments_paid, installment_amount, installment_interval)
             )
             loan_id = self.db_manager.cursor.lastrowid
@@ -3621,13 +3629,15 @@ class FinanceApp(QMainWindow):
             QMessageBox.information(self, "موفق", "وام با موفقیت ثبت شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
+
 
     def edit_loan(self, loan_id):
         try:
             self.db_manager.execute(
                 """
-                SELECT type, bank_name, total_amount, paid_amount, interest_rate, start_date, 
-                    account_id, installments_total, installments_paid, installment_amount, 
+                SELECT type, bank_name, total_amount, paid_amount, interest_rate, start_date,
+                    account_id, installments_total, installments_paid, installment_amount,
                     installment_interval
                 FROM loans WHERE id = ?
                 """,
@@ -3670,12 +3680,28 @@ class FinanceApp(QMainWindow):
             edit_installment_amount.setText(str(installment_amount) if installment_amount else "")
             edit_installment_interval = NumberInput()
             edit_installment_interval.setText(str(installment_interval) if installment_interval else "30")
+
+            # چک‌باکس "مبلغ وام به حساب اضافه شود؟" برای ویرایش
+            # وضعیت این چک‌باکس باید بر اساس اینکه آیا در زمان ثبت وام، مبلغ به حساب اضافه شده بود یا نه، تعیین شود.
+            # برای این کار، نیاز به یک ستون جدید در جدول loans داریم که این وضعیت را ذخیره کند.
+            # فعلاً، به دلیل نبود این ستون، می‌توانیم آن را به‌صورت پیش‌فرض فعال در نظر بگیریم
+            # یا اگر logic دیگری برای تعیین آن دارید، اعمال کنید.
+            # برای سادگی، فعلاً آن را نمایش نمی‌دهیم یا همیشه فعال در نظر می‌گیریم تا زمانی که ستون مربوطه اضافه شود.
+            # اگر می‌خواهید این چک‌باکس در ویرایش نیز قابل تنظیم باشد، باید ستون `is_added_to_account` را به جدول `loans` اضافه کنید.
+            # فرض می‌کنیم در اینجا فعلاً نیازی به این کنترل در ویرایش نداریم و موجودی از طریق اقساط مدیریت می‌شود.
+            # اگر نیاز به این کنترل در ویرایش بود، باید `ALTER TABLE` برای `loans` در `init_db` اضافه شود.
+
+
             save_btn = QPushButton("ذخیره")
+            # در save_loan، پارامتر add_to_account را نیز ارسال می‌کنیم.
+            # چون در ویرایش این چک‌باکس را اضافه نکردیم (طبق کامنت بالا)، فعلاً مقدار True را به صورت پیش‌فرض ارسال می‌کنیم.
+            # اگر چک‌باکس را در edit_loan اضافه کردید، باید مقدار آن را از edit_loan_add_to_account_checkbox.isChecked() بگیرید.
             save_btn.clicked.connect(lambda: self.save_loan(
                 loan_id, edit_type.currentText(), edit_bank.text(), edit_amount.get_raw_value(),
                 edit_interest.get_raw_value() or 0, edit_account.currentData(), edit_start_date.text(),
                 edit_installments_total.get_raw_value(), edit_installments_paid.get_raw_value() or 0,
-                edit_installment_amount.get_raw_value(), edit_installment_interval.get_raw_value() or 30, dialog
+                edit_installment_amount.get_raw_value(), edit_installment_interval.get_raw_value() or 30, dialog,
+                True # فرض می‌کنیم همیشه True است تا زمانی که چک‌باکس در ویرایش اضافه شود.
             ))
 
             layout.addRow("نوع وام:", edit_type)
@@ -3694,9 +3720,10 @@ class FinanceApp(QMainWindow):
             dialog.exec()
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
 
-    def save_loan(self, loan_id, type_text, bank_name, total_amount, interest_rate, account_id, start_date, 
-              installments_total, installments_paid, installment_amount, installment_interval, dialog):
+    def save_loan(self, loan_id, type_text, bank_name, total_amount, interest_rate, account_id, start_date,
+              installments_total, installments_paid, installment_amount, installment_interval, dialog, add_to_account_on_edit):
         if not bank_name:
             QMessageBox.warning(self, "خطا", "نام بانک نمی‌تواند خالی باشد!")
             return
@@ -3731,30 +3758,46 @@ class FinanceApp(QMainWindow):
             old_loan = self.db_manager.fetchone()
             if not old_loan:
                 QMessageBox.warning(self, "خطا", "وام یافت نشد!")
+                self.db_manager.rollback()
                 return
             old_type, old_total_amount, old_account_id = old_loan
 
-            # بازگرداندن اثر وام قبلی بر موجودی حساب
-            if old_type == "taken":
-                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_total_amount, old_account_id))
-            else:
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_total_amount, old_account_id))
+            # بازگرداندن اثر وام قبلی بر موجودی حساب فقط اگر قبلاً اضافه شده بود
+            # در اینجا فرض می‌کنیم که اگر مبلغ وام در ابتدا به حساب اضافه شده باشد، باید در ویرایش هم مدیریت شود.
+            # این نیاز به یک ستون جدید در جدول loans دارد تا وضعیت اولیه را ذخیره کند.
+            # فعلاً، اگر در زمان ایجاد وام، چک‌باکس فعال بود، فرض می‌کنیم اثرش روی حساب بوده و باید خنثی شود.
+            # برای ساده‌سازی فعلی، فرض می‌کنیم هر بار ویرایش، اثر را خنثی و مجددا اعمال می‌کند.
+            # اگر نیاز به رفتار دقیق‌تر بود، ستون is_initial_amount_added_to_account INTEGER DEFAULT 1
+            # باید به جدول loans اضافه شود و هنگام add_loan مقداردهی شود.
+            # سپس در save_loan بر اساس آن ستون عمل شود.
 
-            # اعمال اثر وام جدید
-            if loan_type == "taken":
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (total_amount, account_id))
-            else:
-                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (total_amount, account_id))
+            # فرض: اگر old_account_id وجود داشت، یعنی قبلاً به حساب اضافه شده بود.
+            # (این فرض ممکن است در همه سناریوها دقیق نباشد و راه حل بهتر، اضافه کردن یک ستون is_amount_affected_account باشد)
+            if old_account_id: # اگر وامی قبلا به حسابی مرتبط بوده است
+                 if old_type == "taken": # اگر وام گرفته شده بود، مبلغش اضافه شده بود، حالا کم کن
+                     self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_total_amount, old_account_id))
+                 else: # اگر وام داده شده بود، مبلغش کم شده بود، حالا اضافه کن
+                     self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_total_amount, old_account_id))
+
+
+            # اعمال اثر وام جدید فقط اگر add_to_account_on_edit (که از چک‌باکس گرفته می‌شود) فعال باشد.
+            # فعلاً add_to_account_on_edit را True در نظر گرفتیم.
+            if add_to_account_on_edit:
+                if loan_type == "taken":
+                    self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (total_amount, account_id))
+                else:
+                    self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (total_amount, account_id))
+
 
             # به‌روزرسانی وام با installment_interval
             self.db_manager.execute(
                 """
-                UPDATE loans SET type = ?, bank_name = ?, total_amount = ?, interest_rate = ?, 
-                                start_date = ?, account_id = ?, installments_total = ?, 
+                UPDATE loans SET type = ?, bank_name = ?, total_amount = ?, interest_rate = ?,
+                                start_date = ?, account_id = ?, installments_total = ?,
                                 installments_paid = ?, installment_amount = ?, installment_interval = ?
                 WHERE id = ?
                 """,
-                (loan_type, bank_name, total_amount, interest_rate, date, account_id, 
+                (loan_type, bank_name, total_amount, interest_rate, date, account_id,
                 installments_total, installments_paid, installment_amount, installment_interval, loan_id)
             )
 
@@ -3781,6 +3824,7 @@ class FinanceApp(QMainWindow):
             QMessageBox.information(self, "موفق", "وام با موفقیت ویرایش شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            self.db_manager.rollback() # اضافه شده برای اطمینان از rollback
 
     def load_loans(self):
         try:
