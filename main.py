@@ -4152,11 +4152,12 @@ class FinanceApp(QMainWindow):
                 (amount, date, installment_id)
             )
             self.db_manager.commit()
-            self.view_installments(loan_id)  # به‌روزرسانی جدول اقساط
+            
             dialog.accept()
             parent_dialog.accept()  # بستن دیالوگ اصلی و باز کردن مجدد
-            self.view_installments(loan_id)  # باز کردن مجدد دیالوگ اقساط
             QMessageBox.information(self, "موفق", "قسط با موفقیت ویرایش شد!")
+            self.view_installments(loan_id)  # باز کردن مجدد دیالوگ اقساط
+            
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
@@ -4227,8 +4228,9 @@ class FinanceApp(QMainWindow):
             self.load_loans()
             dialog.accept()  # بستن دیالوگ تسویه
             parent_dialog.accept()  # بستن دیالوگ لیست اقساط
-            self.view_installments(loan_id)  # باز کردن مجدد لیست اقساط به‌روزرسانی‌شده
             QMessageBox.information(self, "موفق", "قسط با موفقیت تسویه شد!")
+            self.view_installments(loan_id)  # باز کردن مجدد لیست اقساط به‌روزرسانی‌شده
+            
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
