@@ -46,7 +46,7 @@ This is a personal finance management application built using PyQt6 for the grap
 - **پایتون**: نسخه 3.12.4  
 - **کتابخانه‌ها**:  
   ```bash
-  pip install PyQt6 pandas openpyxl reportlab matplotlib jdatetime bcrypt dropbox
+  pip install PyQt6 pandas openpyxl reportlab matplotlib jdatetime bcrypt dropbox python-bidi arabic_reshaper
   ```
 
 **English**  
@@ -55,7 +55,7 @@ To run the program, you need Python and the following libraries installed:
 - **Python**: Version 3.12.4  
 - **Libraries**:  
   ```bash
-  pip install PyQt6 pandas openpyxl reportlab matplotlib jdatetime bcrypt dropbox
+  pip install PyQt6 pandas openpyxl reportlab matplotlib jdatetime bcrypt dropbox python-bidi arabic_reshaper
   ```
 
 ---
