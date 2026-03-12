@@ -5,7 +5,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget,
                              QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
                              QTableWidgetItem, QLabel, QLineEdit, QComboBox,
                              QMessageBox, QFormLayout, QGridLayout, QScrollArea, 
-                             QDialog, QCheckBox, QCalendarWidget,QSpacerItem, QSizePolicy, QFrame)
+                             QDialog, QCheckBox, QCalendarWidget,QSpacerItem, QSizePolicy, QFrame,
+                             QHeaderView)
 from PyQt6.QtCore import QDate, Qt, QTimer, QLocale  # اضافه کردن QLocale
 from PyQt6.QtGui import QIcon, QFont, QColor, QIntValidator
 import sqlite3
@@ -31,223 +32,13 @@ from arabic_reshaper import reshape
 from database import DatabaseManager
 from login_dialog import LoginDialog
 from change_password_dialog import ChangePasswordDialog
+from ui.components.custom_widgets import NumberInput, PersianCalendarPopup, PersianCalendarWidget
+from core import utils
+from ui.tabs.dashboard_tab import DashboardTab
+
 
 # تنظیم locale برای جداکننده اعداد
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
-
-# توابع تبدیل تاریخ
-def gregorian_to_shamsi(date):
-    try:
-        if not date:
-            return ""
-        if isinstance(date, QDate):
-            date_str = date.toString("yyyy-MM-dd")
-        else:
-            date_str = str(date)
-        g_date = QDate.fromString(date_str, "yyyy-MM-dd")
-        if not g_date.isValid():
-            return date_str
-        j_date = jdatetime.date.fromgregorian(year=g_date.year(), month=g_date.month(), day=g_date.day())
-        return j_date.strftime("%Y/%m/%d")
-    except Exception:
-        return str(date)
-
-def shamsi_to_gregorian(date_str):
-    try:
-        if not date_str or not isinstance(date_str, str):
-            return None
-        if not re.match(r"^\d{4}/\d{2}/\d{2}$", date_str):
-            return None
-        j_year, j_month, j_day = map(int, date_str.replace('/', '-').split('-'))
-        jdatetime.date(j_year, j_month, j_day)  # اعتبارسنجی
-        g_date = jdatetime.date(j_year, j_month, j_day).togregorian()
-        return f"{g_date.year}-{g_date.month:02d}-{g_date.day:02d}"
-    except (ValueError, TypeError):
-        return None
-
-def is_valid_shamsi_date(date_str):
-    return bool(re.match(r"^\d{4}/\d{2}/\d{2}$", date_str))
-
-def format_number(number):
-    return locale.format_string("%d", int(number), grouping=True)
-
-# ویجت تقویم شمسی
-class PersianCalendarWidget(QWidget):
-    def __init__(self, date_field, parent=None):
-        super().__init__(parent)
-        self.date_field = date_field
-        self.current_date = jdatetime.date.today()
-        self.layout = QVBoxLayout(self)
-        self.setLayout(self.layout)
-        self.setMinimumSize(300, 250)  # افزایش اندازه کلی برای خوانایی بهتر
-
-        # هدر تقویم
-        self.header_layout = QHBoxLayout()
-        self.prev_month_btn = QPushButton("<")
-        self.next_month_btn = QPushButton(">")
-        self.month_label = QLabel()
-        self.update_month_label()
-        self.header_layout.addWidget(self.prev_month_btn)
-        self.header_layout.addWidget(self.month_label, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.header_layout.addWidget(self.next_month_btn)
-        self.layout.addLayout(self.header_layout)
-
-        # گرید روزهای هفته
-        self.calendar_grid = QGridLayout()
-        self.layout.addLayout(self.calendar_grid)
-
-        # استایل‌دهی
-        self.setStyleSheet("""
-            PersianCalendarWidget {
-                background-color: #f9f9f9;
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                padding: 5px;
-            }
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px;
-                border-radius: 3px;
-                font-family: Vazir, Arial;
-                min-width: 30px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QLabel {
-                font-family: Vazir, Arial;
-                font-size: 14px;
-                color: #333;
-                padding: 5px;
-            }
-            QGridLayout {
-                margin: 5px;
-            }
-        """)
-
-        self.prev_month_btn.clicked.connect(self.prev_month)
-        self.next_month_btn.clicked.connect(self.next_month)
-        self.update_calendar()
-
-    def update_month_label(self):
-        self.month_label.setText(f"{self.current_date.year}/{self.current_date.month:02d}")
-
-    def get_days_in_month(self, year, month):
-        for day in range(31, 27, -1):
-            try:
-                jdatetime.date(year, month, day)
-                return day
-            except ValueError:
-                continue
-        return 28
-
-    def update_calendar(self):
-        for i in reversed(range(self.calendar_grid.count())):
-            self.calendar_grid.itemAt(i).widget().setParent(None)
-        
-        # نمایش روزهای هفته
-        days = ["ش", "ی", "د", "س", "چ", "پ", "ج"]
-        for col, day in enumerate(days):
-            label = QLabel(day)
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet("font-weight: bold; color: #444;")
-            self.calendar_grid.addWidget(label, 0, col)
-
-        # محاسبه روزهای ماه
-        first_day = jdatetime.date(self.current_date.year, self.current_date.month, 1)
-        last_day = self.get_days_in_month(self.current_date.year, self.current_date.month)
-        start_col = first_day.weekday()
-        day_count = 1
-
-        # تنظیم ارتفاع ردیف‌ها برای جلوگیری از برش متن
-        for row in range(6):  # حداکثر 6 ردیف برای تقویم
-            self.calendar_grid.setRowMinimumHeight(row + 1, 40)  # ارتفاع ردیف‌ها
-            for col in range(7):
-                if (row == 0 and col < start_col) or day_count > last_day:
-                    continue
-                button = QPushButton(str(day_count))
-                button.clicked.connect(lambda checked, d=day_count: self.day_clicked(d))
-                button.setMinimumSize(40, 40)  # اندازه حداقل دکمه برای نمایش اعداد بزرگ
-                button.setStyleSheet("""
-                    QPushButton {
-                        background-color: #fff;
-                        color: #333;
-                        border: 1px solid #ddd;
-                        border-radius: 3px;
-                        font-family: Vazir, Arial;
-                        font-size: 12px;
-                        padding: 5px;
-                    }
-                    QPushButton:hover {
-                        background-color: #e0e0e0;
-                    }
-                """)
-                self.calendar_grid.addWidget(button, row + 1, col)
-                day_count += 1
-
-    def prev_month(self):
-        year = self.current_date.year
-        month = self.current_date.month - 1
-        if month == 0:
-            month = 12
-            year -= 1
-        self.current_date = jdatetime.date(year, month, 1)
-        self.update_month_label()
-        self.update_calendar()
-
-    def next_month(self):
-        year = self.current_date.year
-        month = self.current_date.month + 1
-        if month == 13:
-            month = 1
-            year += 1
-        self.current_date = jdatetime.date(year, month, 1)
-        self.update_month_label()
-        self.update_calendar()
-
-    def day_clicked(self, day):
-        selected_date = jdatetime.date(self.current_date.year, self.current_date.month, day)
-        self.date_field.setText(selected_date.strftime("%Y/%m/%d"))
-
-class PersianCalendarPopup(QDialog):
-    def __init__(self, date_edit, parent=None):
-        super().__init__(parent)
-        self.date_edit = date_edit
-        self.setWindowTitle("انتخاب تاریخ")
-        layout = QVBoxLayout()
-        self.calendar = PersianCalendarWidget(self.date_edit)  # پاس دادن date_edit به PersianCalendarWidget
-        layout.addWidget(self.calendar)
-        self.setLayout(layout)
-
-    # نیازی به متد set_date نیست چون PersianCalendarWidget خودش تاریخ رو ست می‌کنه
-
-class NumberInput(QLineEdit):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.textChanged.connect(self.format_input)
-
-    def format_input(self):
-        text = self.text().replace(",", "")  # حذف جداکننده‌ها برای پردازش
-        if text and (text.startswith('-') or text == '0'):
-            self.setStyleSheet("background-color: #ffe6e6;")  # رنگ پس‌زمینه قرمز برای خطا
-            return
-        if text.isdigit():
-            formatted = format_number(int(text))
-            self.setText(formatted)
-            self.setStyleSheet("")  # بازگرداندن استایل پیش‌فرض
-            self.setCursorPosition(len(formatted))  # مکان‌نما رو آخر متن می‌بره
-
-    def get_raw_value(self):
-        text = self.text().replace(",", "")
-        if text.isdigit():
-            value = int(text)
-            if value <= 0:
-                return None  # مقادیر صفر یا منفی نامعتبر هستند
-            return value
-        return None  # یا مقدار پیش‌فرض دیگر
 
 class FinanceApp(QMainWindow):
     def __init__(self):
@@ -485,7 +276,8 @@ class FinanceApp(QMainWindow):
         tabs = QTabWidget()
         tabs.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
-        dashboard_tab = self.create_dashboard_tab()
+        self.dashboard_tab = DashboardTab(self.db_manager)
+
         accounts_tab = self.create_accounts_tab()
         transactions_tab = self.create_transactions_tab()
         debts_tab = self.create_debts_tab()
@@ -495,7 +287,7 @@ class FinanceApp(QMainWindow):
         categories_tab = self.create_categories_tab()
         settings_tab = self.create_settings_tab()
 
-        tabs.addTab(dashboard_tab, "داشبورد")
+        tabs.addTab(self.dashboard_tab, "داشبورد")
         tabs.addTab(accounts_tab, "حساب‌ها")
         tabs.addTab(transactions_tab, "تراکنش‌ها")
         tabs.addTab(debts_tab, "بدهی/طلب")
@@ -514,148 +306,11 @@ class FinanceApp(QMainWindow):
 
     def on_tab_changed(self, index):
         if index == 0:  # تب داشبورد
-            self.update_dashboard()
+            self.dashboard_tab.update_dashboard()
 
     def show_change_password_dialog(self, username):
         dialog = ChangePasswordDialog(self.db_manager, username, self)
         dialog.exec()
-
-    def create_dashboard_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-        
-        header = QWidget()
-        header_layout = QHBoxLayout()
-        header.setStyleSheet("background-color: #4CAF50; border-radius: 10px; padding: 10px;")
-        title_label = QLabel("📊 داشبورد مالی")
-        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: white;")
-        self.total_balance_label = QLabel("موجودی کل: ۰ ریال")
-        self.total_balance_label.setStyleSheet("font-size: 18px; color: white;")
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        header_layout.addWidget(self.total_balance_label)
-        header.setLayout(header_layout)
-        layout.addWidget(header)
-
-        # بخش جدید: آمار ماه جاری
-        stats_widget = QWidget()
-        stats_layout = QHBoxLayout()
-        stats_widget.setStyleSheet("background-color: white; border-radius: 10px; padding: 10px; margin-top: 10px;")
-
-        # ستون 1: جمع هزینه‌ها
-        expenses_column = QVBoxLayout()
-        expenses_label = QLabel("جمع هزینه در ماه جاری")
-        expenses_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
-        self.expenses_value = QLabel("۰ ریال")
-        self.expenses_value.setStyleSheet("font-size: 16px; color: red;")
-        expenses_column.addWidget(expenses_label)
-        expenses_column.addWidget(self.expenses_value)
-        stats_layout.addLayout(expenses_column)
-
-        # ستون 2: جمع درآمد‌ها
-        income_column = QVBoxLayout()
-        income_label = QLabel("جمع درآمد در ماه جاری")
-        income_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
-        self.income_value = QLabel("۰ ریال")
-        self.income_value.setStyleSheet("font-size: 16px; color: #333;")
-        income_column.addWidget(income_label)
-        income_column.addWidget(self.income_value)
-        stats_layout.addLayout(income_column)
-
-        # ستون 3: اختلاف هزینه و درآمد
-        balance_column = QVBoxLayout()
-        balance_label = QLabel("اختلاف هزینه و درآمد ماه جاری")
-        balance_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
-        self.balance_value = QLabel("۰ ریال")
-        self.balance_value.setStyleSheet("font-size: 16px; color: #333;")
-        balance_column.addWidget(balance_label)
-        balance_column.addWidget(self.balance_value)
-        stats_layout.addLayout(balance_column)
-
-        # ستون 4: جمع طلب‌ها
-        credits_column = QVBoxLayout()
-        credits_label = QLabel("جمع طلب‌های ماه جاری")
-        credits_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
-        self.credits_value = QLabel("۰ ریال")
-        self.credits_value.setStyleSheet("font-size: 16px; color: #333;")
-        credits_column.addWidget(credits_label)
-        credits_column.addWidget(self.credits_value)
-        stats_layout.addLayout(credits_column)
-
-        # ستون 5: جمع بدهی‌ها
-        debts_column = QVBoxLayout()
-        debts_label = QLabel("جمع بدهی‌های ماه جاری")
-        debts_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
-        self.debts_value = QLabel("۰ ریال")
-        self.debts_value.setStyleSheet("font-size: 16px; color: red;")
-        debts_column.addWidget(debts_label)
-        debts_column.addWidget(self.debts_value)
-        stats_layout.addLayout(debts_column)
-
-        stats_widget.setLayout(stats_layout)
-        layout.addWidget(stats_widget)
-
-        debts_widget = QWidget()
-        debts_layout = QVBoxLayout()
-        debts_widget.setStyleSheet("background-color: white; border-radius: 10px; padding: 10px; margin-top: 10px;")
-        debts_label = QLabel("💸 بدهی‌ها و طلب‌های مهم")
-        debts_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
-        debts_layout.addWidget(debts_label)
-
-        scroll_area_debts = QScrollArea()
-        self.important_debts_table = QTableWidget()
-        self.important_debts_table.setColumnCount(5)
-        self.important_debts_table.setHorizontalHeaderLabels(["شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت"])
-        self.important_debts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.important_debts_table.verticalHeader().setDefaultSectionSize(40)
-        self.important_debts_table.setColumnWidth(0, 150)
-        self.important_debts_table.setColumnWidth(1, 100)
-        self.important_debts_table.setColumnWidth(2, 100)
-        self.important_debts_table.setColumnWidth(3, 100)
-        self.important_debts_table.setColumnWidth(4, 80)
-        scroll_area_debts.setWidget(self.important_debts_table)
-        scroll_area_debts.setWidgetResizable(True)
-        scroll_area_debts.setMinimumHeight(200)
-        debts_layout.addWidget(scroll_area_debts)
-        debts_widget.setLayout(debts_layout)
-        layout.addWidget(debts_widget)
-
-        recent_widget = QWidget()
-        recent_layout = QVBoxLayout()
-        recent_widget.setStyleSheet("background-color: white; border-radius: 10px; padding: 10px; margin-top: 10px;")
-        recent_label = QLabel("📜 تراکنش‌های اخیر")
-        recent_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
-        recent_layout.addWidget(recent_label)
-
-        scroll_area = QScrollArea()
-        self.recent_transactions_table = QTableWidget()
-        self.recent_transactions_table.setColumnCount(6)
-        self.recent_transactions_table.setHorizontalHeaderLabels(["تاریخ", "حساب", "دسته‌بندی", "مبلغ", "توضیحات", "نوع"])
-        self.recent_transactions_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.recent_transactions_table.verticalHeader().setDefaultSectionSize(40)
-        scroll_area.setWidget(self.recent_transactions_table)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(400)
-        recent_layout.addWidget(scroll_area)
-
-        self.recent_current_page = 1
-        self.recent_per_page = 50
-        pagination_layout = QHBoxLayout()
-        self.recent_prev_btn = QPushButton("صفحه قبلی")
-        self.recent_next_btn = QPushButton("صفحه بعدی")
-        self.recent_page_label = QLabel("صفحه 1")
-        self.recent_prev_btn.clicked.connect(self.prev_recent_page)
-        self.recent_next_btn.clicked.connect(self.next_recent_page)
-        pagination_layout.addWidget(self.recent_prev_btn)
-        pagination_layout.addWidget(self.recent_page_label)
-        pagination_layout.addWidget(self.recent_next_btn)
-        recent_layout.addLayout(pagination_layout)
-
-        recent_widget.setLayout(recent_layout)
-        layout.addWidget(recent_widget)
-
-        tab.setLayout(layout)
-        return tab
 
     def create_accounts_tab(self):
         tab = QWidget()
@@ -699,10 +354,10 @@ class FinanceApp(QMainWindow):
         self.transaction_amount = NumberInput()
         self.transaction_date = QLineEdit()
         today = datetime.now().date()
-        self.transaction_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
+        self.transaction_date.setText(utils.gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.transaction_date.setPlaceholderText("1404/02/13")
         self.transaction_date.setReadOnly(True)
-        self.transaction_date.mousePressEvent = lambda event: self.show_calendar_popup(self.transaction_date)
+        self.transaction_date.mousePressEvent = lambda a0: self.show_calendar_popup(self.transaction_date)
         self.transaction_desc = QLineEdit()
         add_transaction_btn = QPushButton("ثبت تراکنش")
         add_transaction_btn.clicked.connect(self.add_transaction)
@@ -724,7 +379,7 @@ class FinanceApp(QMainWindow):
         self.transfer_to_account = QComboBox()
         self.transfer_amount = NumberInput()
         self.transfer_date = QLineEdit()
-        self.transfer_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
+        self.transfer_date.setText(utils.gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.transfer_date.setPlaceholderText("1404/02/13")
         self.transfer_date.setReadOnly(True)
         self.transfer_date.mousePressEvent = lambda event: self.show_calendar_popup(self.transfer_date)
@@ -833,12 +488,12 @@ class FinanceApp(QMainWindow):
             if not start_date or not end_date:
                 QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
                 return
-            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+            if not utils.is_valid_shamsi_date(start_date) or not utils.is_valid_shamsi_date(end_date):
                 QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
                 return
 
-            start_date_g = shamsi_to_gregorian(start_date)
-            end_date_g = shamsi_to_gregorian(end_date)
+            start_date_g = utils.shamsi_to_gregorian(start_date)
+            end_date_g = utils.shamsi_to_gregorian(end_date)
             if not start_date_g or not end_date_g:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -923,11 +578,11 @@ class FinanceApp(QMainWindow):
         table.setRowCount(len(page_results))
         for row, (id, date, account, person, category, amount, desc, cat_type) in enumerate(page_results):
             table.setItem(row, 0, QTableWidgetItem(str(id)))
-            table.setItem(row, 1, QTableWidgetItem(gregorian_to_shamsi(date)))
+            table.setItem(row, 1, QTableWidgetItem(utils.gregorian_to_shamsi(date)))
             table.setItem(row, 2, QTableWidgetItem(account))
             table.setItem(row, 3, QTableWidgetItem(person or "-"))
             table.setItem(row, 4, QTableWidgetItem(category))
-            table.setItem(row, 5, QTableWidgetItem(format_number(amount)))
+            table.setItem(row, 5, QTableWidgetItem(utils.format_number(amount)))
             table.setItem(row, 6, QTableWidgetItem(desc or "-"))
             table.setItem(row, 7, QTableWidgetItem("درآمد" if cat_type == "income" else "هزینه"))
 
@@ -946,7 +601,42 @@ class FinanceApp(QMainWindow):
     # اصلاح متد create_debts_tab
     def create_debts_tab(self):
         tab = QWidget()
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
+        
+        # ایجاد یک QHBoxLayout برای قرار دادن جدول در سمت چپ و فرم‌ها در سمت راست
+        content_layout = QHBoxLayout()
+        
+        # بخش چپ: جدول بدهی‌ها با اسکرول
+        left_layout = QVBoxLayout()
+        scroll_area = QScrollArea()
+        self.debts_table = QTableWidget()
+        self.debts_table.setColumnCount(10)
+        self.debts_table.setHorizontalHeaderLabels(["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "توضیحات", "ویرایش", "حذف", "تسویه"])
+        self.debts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.debts_table.verticalHeader().setDefaultSectionSize(40)
+        scroll_area.setWidget(self.debts_table)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(400)
+        left_layout.addWidget(scroll_area)
+        
+        # صفحه‌بندی
+        self.debts_current_page = 1
+        self.debts_per_page = 50
+        pagination_layout = QHBoxLayout()
+        self.debts_prev_btn = QPushButton("صفحه قبلی")
+        self.debts_next_btn = QPushButton("صفحه بعدی")
+        self.debts_page_label = QLabel("صفحه 1")
+        self.debts_prev_btn.clicked.connect(self.prev_debts_page)
+        self.debts_next_btn.clicked.connect(self.next_debts_page)
+        pagination_layout.addWidget(self.debts_prev_btn)
+        pagination_layout.addWidget(self.debts_page_label)
+        pagination_layout.addWidget(self.debts_next_btn)
+        left_layout.addLayout(pagination_layout)
+        
+        # بخش راست: فرم‌ها
+        right_layout = QVBoxLayout()
+        
+        # فرم ثبت بدهی/طلب
         form_layout = QFormLayout()
         self.debt_person = QComboBox()
         self.debt_amount = NumberInput()
@@ -954,7 +644,7 @@ class FinanceApp(QMainWindow):
         self.debt_account.setEnabled(False)
         self.debt_due_date = QLineEdit()
         today = datetime.now().date()
-        self.debt_due_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
+        self.debt_due_date.setText(utils.gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.debt_due_date.setPlaceholderText("1404/02/13")
         self.debt_due_date.setReadOnly(True)
         self.debt_due_date.mousePressEvent = lambda event: self.show_calendar_popup(self.debt_due_date)
@@ -975,7 +665,7 @@ class FinanceApp(QMainWindow):
         form_layout.addRow("", self.debt_show_in_dashboard)
         form_layout.addRow("توضیحات:", self.debt_description)
         form_layout.addRow(add_debt_btn)
-        layout.addLayout(form_layout)
+        right_layout.addLayout(form_layout)
 
         # فرم جستجو و گزارش‌گیری
         search_form = QFormLayout()
@@ -1004,35 +694,14 @@ class FinanceApp(QMainWindow):
         search_form.addRow("از تاریخ (شمسی):", self.debt_search_start_date)
         search_form.addRow("تا تاریخ (شمسی):", self.debt_search_end_date)
         search_form.addRow(search_btn)
-        layout.addLayout(search_form)
-
-        # جدول بدهی‌ها با اسکرول
-        scroll_area = QScrollArea()
-        self.debts_table = QTableWidget()
-        self.debts_table.setColumnCount(10)
-        self.debts_table.setHorizontalHeaderLabels(["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "توضیحات", "ویرایش", "حذف", "تسویه"])
-        self.debts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.debts_table.verticalHeader().setDefaultSectionSize(40)
-        scroll_area.setWidget(self.debts_table)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(400)
-        layout.addWidget(scroll_area)
-
-        # صفحه‌بندی
-        self.debts_current_page = 1
-        self.debts_per_page = 50
-        pagination_layout = QHBoxLayout()
-        self.debts_prev_btn = QPushButton("صفحه قبلی")
-        self.debts_next_btn = QPushButton("صفحه بعدی")
-        self.debts_page_label = QLabel("صفحه 1")
-        self.debts_prev_btn.clicked.connect(self.prev_debts_page)
-        self.debts_next_btn.clicked.connect(self.next_debts_page)
-        pagination_layout.addWidget(self.debts_prev_btn)
-        pagination_layout.addWidget(self.debts_page_label)
-        pagination_layout.addWidget(self.debts_next_btn)
-        layout.addLayout(pagination_layout)
-
-        tab.setLayout(layout)
+        right_layout.addLayout(search_form)
+        
+        # اضافه کردن بخش‌های چپ و راست به لایوت اصلی
+        content_layout.addLayout(right_layout, 2)  # 3: نسبت عرض جدول
+        content_layout.addLayout(left_layout, 3)  # 2: نسبت عرض فرم‌ها
+        
+        main_layout.addLayout(content_layout)
+        tab.setLayout(main_layout)
         return tab
 
     def toggle_account_field(self, state):
@@ -1058,7 +727,7 @@ class FinanceApp(QMainWindow):
         # 2. تغییر لیبل تاریخ شروع به تاریخ دریافت وام
         self.loan_start_date = QLineEdit()
         today = datetime.now().date()
-        self.loan_start_date.setText(gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
+        self.loan_start_date.setText(utils.gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
         self.loan_start_date.setPlaceholderText("1404/02/13")
         self.loan_start_date.setReadOnly(True)
         self.loan_start_date.mousePressEvent = lambda event: self.show_calendar_popup(self.loan_start_date)
@@ -1175,12 +844,12 @@ class FinanceApp(QMainWindow):
             if not start_date or not end_date:
                 QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
                 return
-            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+            if not utils.is_valid_shamsi_date(start_date) or not utils.is_valid_shamsi_date(end_date):
                 QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
                 return
 
-            start_date_g = shamsi_to_gregorian(start_date)
-            end_date_g = shamsi_to_gregorian(end_date)
+            start_date_g = utils.shamsi_to_gregorian(start_date)
+            end_date_g = utils.shamsi_to_gregorian(end_date)
             if not start_date_g or not end_date_g:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -1263,9 +932,9 @@ class FinanceApp(QMainWindow):
         for row, (id, person, amount, paid, due_date, is_paid, account, is_credit, description) in enumerate(page_results):
             table.setItem(row, 0, QTableWidgetItem(str(id)))
             table.setItem(row, 1, QTableWidgetItem(person))
-            table.setItem(row, 2, QTableWidgetItem(format_number(amount)))
-            table.setItem(row, 3, QTableWidgetItem(format_number(paid)))
-            table.setItem(row, 4, QTableWidgetItem(gregorian_to_shamsi(due_date) if due_date else "-"))
+            table.setItem(row, 2, QTableWidgetItem(utils.format_number(amount)))
+            table.setItem(row, 3, QTableWidgetItem(utils.format_number(paid)))
+            table.setItem(row, 4, QTableWidgetItem(utils.gregorian_to_shamsi(due_date) if due_date else "-"))
             table.setItem(row, 5, QTableWidgetItem("پرداخت شده" if is_paid else "در جریان"))
             table.setItem(row, 6, QTableWidgetItem(account))
             table.setItem(row, 7, QTableWidgetItem("طلب" if is_credit else "بدهی"))
@@ -1390,12 +1059,12 @@ class FinanceApp(QMainWindow):
             if not start_date or not end_date:
                 QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
                 return
-            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+            if not utils.is_valid_shamsi_date(start_date) or not utils.is_valid_shamsi_date(end_date):
                 QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
                 return
 
-            start_date_g = shamsi_to_gregorian(start_date)
-            end_date_g = shamsi_to_gregorian(end_date)
+            start_date_g = utils.shamsi_to_gregorian(start_date)
+            end_date_g = utils.shamsi_to_gregorian(end_date)
             if not start_date_g or not end_date_g:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -1409,7 +1078,7 @@ class FinanceApp(QMainWindow):
                 WHERE c.type = 'expense' AND t.date BETWEEN ? AND ?
             """, (start_date_g, end_date_g))
             total_cost = self.db_manager.fetchone()[0] or 0
-            results.append(["مجموع هزینه‌ها", format_number(total_cost)])
+            results.append(["مجموع هزینه‌ها", utils.format_number(total_cost)])
 
             # مجموع درآمدها
             self.db_manager.execute("""
@@ -1419,10 +1088,10 @@ class FinanceApp(QMainWindow):
                 WHERE c.type = 'income' AND t.date BETWEEN ? AND ?
             """, (start_date_g, end_date_g))
             total_income = self.db_manager.fetchone()[0] or 0
-            results.append(["مجموع درآمدها", format_number(total_income)])
+            results.append(["مجموع درآمدها", utils.format_number(total_income)])
 
             # تفاوت
-            results.append(["تفاوت (درآمد - هزینه)", format_number(total_income - total_cost)])
+            results.append(["تفاوت (درآمد - هزینه)", utils.format_number(total_income - total_cost)])
 
             # بستن دیالوگ پارامترها
             dialog.accept()
@@ -1544,12 +1213,12 @@ class FinanceApp(QMainWindow):
             if not start_date or not end_date:
                 QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
                 return
-            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+            if not utils.is_valid_shamsi_date(start_date) or not utils.is_valid_shamsi_date(end_date):
                 QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
                 return
 
-            start_date_g = shamsi_to_gregorian(start_date)
-            end_date_g = shamsi_to_gregorian(end_date)
+            start_date_g = utils.shamsi_to_gregorian(start_date)
+            end_date_g = utils.shamsi_to_gregorian(end_date)
             if not start_date_g or not end_date_g:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -1646,8 +1315,8 @@ class FinanceApp(QMainWindow):
         table.setRowCount(len(page_results))
         for row, (category, amount, date, account, person, desc) in enumerate(page_results):
             table.setItem(row, 0, QTableWidgetItem(category))
-            table.setItem(row, 1, QTableWidgetItem(format_number(amount)))
-            table.setItem(row, 2, QTableWidgetItem(gregorian_to_shamsi(date)))
+            table.setItem(row, 1, QTableWidgetItem(utils.format_number(amount)))
+            table.setItem(row, 2, QTableWidgetItem(utils.gregorian_to_shamsi(date)))
             table.setItem(row, 3, QTableWidgetItem(account))
             table.setItem(row, 4, QTableWidgetItem(person or "-"))
             table.setItem(row, 5, QTableWidgetItem(desc or "-"))
@@ -1697,8 +1366,8 @@ class FinanceApp(QMainWindow):
             for month in range(1, 13):
                 start_date = f"{year}/{month:02d}/01"
                 end_date = f"{year}/{month:02d}/30"  # ساده‌سازی برای تست
-                start_date_g = shamsi_to_gregorian(start_date)
-                end_date_g = shamsi_to_gregorian(end_date)
+                start_date_g = utils.shamsi_to_gregorian(start_date)
+                end_date_g = utils.shamsi_to_gregorian(end_date)
                 
                 query = """
                     SELECT SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as cost,
@@ -1817,12 +1486,12 @@ class FinanceApp(QMainWindow):
             if not start_date or not end_date:
                 QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
                 return
-            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+            if not utils.is_valid_shamsi_date(start_date) or not utils.is_valid_shamsi_date(end_date):
                 QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
                 return
 
-            start_date_g = shamsi_to_gregorian(start_date)
-            end_date_g = shamsi_to_gregorian(end_date)
+            start_date_g = utils.shamsi_to_gregorian(start_date)
+            end_date_g = utils.shamsi_to_gregorian(end_date)
             if not start_date_g or not end_date_g:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -1906,10 +1575,10 @@ class FinanceApp(QMainWindow):
         table.setRowCount(len(page_results))
         for row, (typ, date, account, category, amount, desc, status) in enumerate(page_results):
             table.setItem(row, 0, QTableWidgetItem(typ))
-            table.setItem(row, 1, QTableWidgetItem(gregorian_to_shamsi(date) if date != "-" else "-"))
+            table.setItem(row, 1, QTableWidgetItem(utils.gregorian_to_shamsi(date) if date != "-" else "-"))
             table.setItem(row, 2, QTableWidgetItem(account))
             table.setItem(row, 3, QTableWidgetItem(category))
-            table.setItem(row, 4, QTableWidgetItem(format_number(amount) if isinstance(amount, (int, float)) else amount))
+            table.setItem(row, 4, QTableWidgetItem(utils.format_number(amount) if isinstance(amount, (int, float)) else amount))
             table.setItem(row, 5, QTableWidgetItem(desc))
             table.setItem(row, 6, QTableWidgetItem(status))
 
@@ -1964,7 +1633,7 @@ class FinanceApp(QMainWindow):
             processed_data = []
             for id, amount, due_date, is_paid in installments:
                 status_text = "پرداخت‌شده" if is_paid else "پرداخت‌نشده"
-                processed_data.append((id, format_number(amount), gregorian_to_shamsi(due_date), status_text)) # فرمت‌بندی اینجا [cite: 1]
+                processed_data.append((id, utils.format_number(amount), utils.gregorian_to_shamsi(due_date), status_text)) # فرمت‌بندی اینجا [cite: 1]
 
             # حالا این داده‌های پردازش شده را به generate_export می‌فرستیم [cite: 1]
             # generate_export انتظار یک DataFrame با نام ستون‌های مشخص را دارد [cite: 1]
@@ -2014,8 +1683,8 @@ class FinanceApp(QMainWindow):
                     data,
                     columns=["شناسه", "تاریخ", "حساب", "شخص", "دسته‌بندی", "مبلغ", "توضیحات", "نوع"]
                 )
-                df["تاریخ"] = df["تاریخ"].apply(gregorian_to_shamsi)
-                df["مبلغ"] = df["مبلغ"].apply(format_number)
+                df["تاریخ"] = df["تاریخ"].apply(utils.gregorian_to_shamsi)
+                df["مبلغ"] = df["مبلغ"].apply(utils.format_number)
                 
             elif report_type == "debts":
                 processed_data = []
@@ -2034,32 +1703,32 @@ class FinanceApp(QMainWindow):
                     processed_data,
                     columns=["شناسه", "شخص", "مبلغ", "پرداخت شده", "سررسید", "وضعیت", "حساب", "نوع", "توضیحات"]
                 )
-                df["سررسید"] = df["سررسید"].apply(lambda x: gregorian_to_shamsi(x) if x else "-")
-                df["مبلغ"] = df["مبلغ"].apply(format_number)
-                df["پرداخت شده"] = df["پرداخت شده"].apply(format_number)
+                df["سررسید"] = df["سررسید"].apply(lambda x: utils.gregorian_to_shamsi(x) if x else "-")
+                df["مبلغ"] = df["مبلغ"].apply(utils.format_number)
+                df["پرداخت شده"] = df["پرداخت شده"].apply(utils.format_number)
 
             elif report_type == "cost_income":
                 df = pd.DataFrame(
                     data,
                     columns=["نوع", "مبلغ", "تاریخ", "حساب", "شخص", "توضیحات"]
                 )
-                df["تاریخ"] = df["تاریخ"].apply(gregorian_to_shamsi)
-                df["مبلغ"] = df["مبلغ"].apply(format_number)
+                df["تاریخ"] = df["تاریخ"].apply(utils.gregorian_to_shamsi)
+                df["مبلغ"] = df["مبلغ"].apply(utils.format_number)
             elif report_type == "monthly":
                 df = pd.DataFrame(
                     data,
                     columns=["ماه", "هزینه", "درآمد", "تفاوت"]
                 )
                 for col in ["هزینه", "درآمد", "تفاوت"]:
-                    df[col] = df[col].apply(format_number)
+                    df[col] = df[col].apply(utils.format_number)
 
             elif report_type == "person":
                 df = pd.DataFrame(
                     data,
                     columns=["دسته‌بندی", "تاریخ", "حساب", "مبلغ", "توضیحات"]
                 )
-                df["تاریخ"] = df["تاریخ"].apply(lambda x: gregorian_to_shamsi(x) if x != "-" else "-")
-                df["مبلغ"] = df["مبلغ"].apply(lambda x: format_number(x) if isinstance(x, (int, float)) else x)
+                df["تاریخ"] = df["تاریخ"].apply(lambda x: utils.gregorian_to_shamsi(x) if x != "-" else "-")
+                df["مبلغ"] = df["مبلغ"].apply(lambda x: utils.format_number(x) if isinstance(x, (int, float)) else x)
 
             elif report_type == "general":
                 df = pd.DataFrame(data, columns=["معیار", "مقدار"])
@@ -2068,7 +1737,7 @@ class FinanceApp(QMainWindow):
                     data,
                     columns=["شناسه قسط", "مبلغ قسط", "سررسید", "وضعیت"] # [cite: 1]
                 )
-                # در اینجا نیازی به gregorian_to_shamsi یا format_number نیست
+                # در اینجا نیازی به utils.gregorian_to_shamsi یا utils.format_number نیست
                 # چون data قبلا در export_single_loan_report فرمت شده است. [cite: 1]
                 
             else: # در صورت عدم تطابق نوع گزارش
@@ -2599,7 +2268,7 @@ class FinanceApp(QMainWindow):
         self.load_transactions()
         self.load_debts()
         self.load_loans()
-        self.update_dashboard()
+        self.dashboard_tab.update_dashboard()
 
     def load_accounts(self):
         try:
@@ -2614,13 +2283,13 @@ class FinanceApp(QMainWindow):
             for row, (id, name, balance) in enumerate(accounts):
                 self.accounts_table.setItem(row, 0, QTableWidgetItem(str(id)))
                 self.accounts_table.setItem(row, 1, QTableWidgetItem(name))
-                self.accounts_table.setItem(row, 2, QTableWidgetItem(format_number(balance)))
+                self.accounts_table.setItem(row, 2, QTableWidgetItem(utils.format_number(balance)))
                 # اضافه کردن دکمه ویرایش
                 edit_btn = QPushButton("ویرایش")
                 edit_btn.clicked.connect(lambda checked, acc_id=id: self.edit_account(acc_id))
                 self.accounts_table.setCellWidget(row, 3, edit_btn)
                 # پر کردن لیست‌های کشویی
-                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
+                display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
                 self.transaction_account.addItem(display_text, id)
                 self.debt_account.addItem(display_text, id)
                 self.loan_account.addItem(display_text, id)
@@ -2791,12 +2460,12 @@ class FinanceApp(QMainWindow):
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
             return
         if not shamsi_date:
-            shamsi_date = gregorian_to_shamsi(datetime.now().date().strftime("%Y-%m-%d"))
-        if not is_valid_shamsi_date(shamsi_date):
+            shamsi_date = utils.gregorian_to_shamsi(datetime.now().date().strftime("%Y-%m-%d"))
+        if not utils.is_valid_shamsi_date(shamsi_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         try:
-            date = shamsi_to_gregorian(shamsi_date)
+            date = utils.shamsi_to_gregorian(shamsi_date)
             if not date:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -2820,7 +2489,7 @@ class FinanceApp(QMainWindow):
             self.transaction_desc.clear()
             self.load_transactions()
             self.load_accounts()
-            self.update_dashboard()
+            self.dashboard_tab.update_dashboard()
             QMessageBox.information(self, "موفق", "تراکنش با موفقیت ثبت شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
@@ -2872,9 +2541,9 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
+                display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
                 edit_account.addItem(display_text, acc_id)
-            edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+            edit_account.setCurrentText([f"{name} (موجودی: {utils.format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
 
             edit_person = QComboBox()
             edit_person.addItem("-", None)
@@ -2907,7 +2576,7 @@ class FinanceApp(QMainWindow):
 
             edit_amount = NumberInput()
             edit_amount.setText(str(amount))
-            edit_date = QLineEdit(gregorian_to_shamsi(date))
+            edit_date = QLineEdit(utils.gregorian_to_shamsi(date))
             edit_date.setReadOnly(True)
             edit_date.setPlaceholderText("1404/02/13")
             edit_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_date)
@@ -2938,12 +2607,12 @@ class FinanceApp(QMainWindow):
         if not amount or not shamsi_date:
             QMessageBox.warning(self, "خطا", "مبلغ و تاریخ نمی‌توانند خالی باشند!")
             return
-        if not is_valid_shamsi_date(shamsi_date):
+        if not utils.is_valid_shamsi_date(shamsi_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         try:
             amount = float(amount)
-            date = shamsi_to_gregorian(shamsi_date)
+            date = utils.shamsi_to_gregorian(shamsi_date)
             if not date:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -2975,7 +2644,7 @@ class FinanceApp(QMainWindow):
             self.db_manager.commit()
             self.load_transactions()
             self.load_accounts()
-            self.update_dashboard()
+            self.dashboard_tab.update_dashboard()
             dialog.accept()
             QMessageBox.information(self, "موفق", "تراکنش با موفقیت ویرایش شد!")
         except sqlite3.Error as e:
@@ -2991,7 +2660,7 @@ class FinanceApp(QMainWindow):
         if not amount or not shamsi_date:
             QMessageBox.warning(self, "خطا", "مبلغ و تاریخ نمی‌توانند خالی باشند!")
             return
-        if not is_valid_shamsi_date(shamsi_date):
+        if not utils.is_valid_shamsi_date(shamsi_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         if from_account_id == to_account_id:
@@ -3000,7 +2669,7 @@ class FinanceApp(QMainWindow):
 
         try:
             # تبدیل تاریخ شمسی به میلادی
-            date = shamsi_to_gregorian(shamsi_date)
+            date = utils.shamsi_to_gregorian(shamsi_date)
             if not date:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -3052,7 +2721,7 @@ class FinanceApp(QMainWindow):
             self.transfer_date.clear()
             self.load_transactions()
             self.load_accounts()
-            self.update_dashboard()
+            self.dashboard_tab.update_dashboard()
             QMessageBox.information(self, "موفق", "انتقال با موفقیت انجام شد!")
 
         except sqlite3.Error as e:
@@ -3062,11 +2731,15 @@ class FinanceApp(QMainWindow):
 
     def load_transactions(self):
         try:
+            # ۱. محاسبه تعداد کل صفحات فقط برای تب تراکنش‌ها
             self.db_manager.execute("SELECT COUNT(*) FROM transactions")
             total_transactions = self.db_manager.fetchone()[0]
             self.transactions_total_pages = (total_transactions + self.transactions_per_page - 1) // self.transactions_per_page
-            self.recent_total_pages = (total_transactions + self.recent_per_page - 1) // self.recent_per_page
+            
+            if self.transactions_total_pages == 0:
+                self.transactions_total_pages = 1
 
+            # ۲. واکشی اطلاعات تب تراکنش‌ها برای صفحه فعلی
             offset = (self.transactions_current_page - 1) * self.transactions_per_page
             self.db_manager.execute(
                 "SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type "
@@ -3079,23 +2752,14 @@ class FinanceApp(QMainWindow):
             )
             transactions = self.db_manager.fetchall()
 
-            offset_recent = (self.recent_current_page - 1) * self.recent_per_page
-            self.db_manager.execute(
-                "SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type "
-                "FROM transactions t "
-                "JOIN accounts a ON t.account_id = a.id "
-                "LEFT JOIN persons p ON t.person_id = p.id "
-                "JOIN categories c ON t.category_id = c.id "
-                "ORDER BY t.date DESC LIMIT ? OFFSET ?",
-                (self.recent_per_page, offset_recent)
-            )
-            recent_transactions = self.db_manager.fetchall()
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             return
 
-        # به‌روزرسانی جدول تراکنش‌ها
+        # ۳. به‌روزرسانی جدول تب تراکنش‌ها
         self.transactions_table.setRowCount(min(len(transactions), self.transactions_per_page))
+        
+        # تنظیم عرض ستون‌ها
         self.transactions_table.setColumnWidth(0, 50)
         self.transactions_table.setColumnWidth(1, 100)
         self.transactions_table.setColumnWidth(2, 150)
@@ -3105,49 +2769,33 @@ class FinanceApp(QMainWindow):
         self.transactions_table.setColumnWidth(6, 200)
         self.transactions_table.setColumnWidth(7, 80)
         self.transactions_table.setColumnWidth(8, 80)
-        self.transactions_table.setColumnWidth(9, 80)  # ستون حذف
+        self.transactions_table.setColumnWidth(9, 80)  # ستون دکمه حذف
+
         for row, (id, date, account, person, category, amount, desc, category_type) in enumerate(transactions):
-            shamsi_date = gregorian_to_shamsi(date)
+            shamsi_date = utils.gregorian_to_shamsi(date) if date else "-"
             self.transactions_table.setItem(row, 0, QTableWidgetItem(str(id)))
             self.transactions_table.setItem(row, 1, QTableWidgetItem(shamsi_date))
-            self.transactions_table.setItem(row, 2, QTableWidgetItem(account))
+            self.transactions_table.setItem(row, 2, QTableWidgetItem(account or "-"))
             self.transactions_table.setItem(row, 3, QTableWidgetItem(person or "-"))
-            self.transactions_table.setItem(row, 4, QTableWidgetItem(category))
-            self.transactions_table.setItem(row, 5, QTableWidgetItem(format_number(amount)))
-            self.transactions_table.setItem(row, 6, QTableWidgetItem(desc))
+            self.transactions_table.setItem(row, 4, QTableWidgetItem(category or "-"))
+            self.transactions_table.setItem(row, 5, QTableWidgetItem(utils.format_number(amount)))
+            self.transactions_table.setItem(row, 6, QTableWidgetItem(desc or ""))
             self.transactions_table.setItem(row, 7, QTableWidgetItem("درآمد" if category_type == "income" else "هزینه"))
+            
+            # ایجاد دکمه ویرایش
             edit_btn = QPushButton("ویرایش")
             edit_btn.clicked.connect(lambda checked, t_id=id: self.edit_transaction(t_id))
             self.transactions_table.setCellWidget(row, 8, edit_btn)
+            
+            # ایجاد دکمه حذف
             delete_btn = QPushButton("حذف")
             delete_btn.clicked.connect(lambda checked, t_id=id: self.delete_transaction(t_id))
             self.transactions_table.setCellWidget(row, 9, delete_btn)
 
-        # به‌روزرسانی جدول تراکنش‌های اخیر
-        self.recent_transactions_table.setRowCount(min(len(recent_transactions), self.recent_per_page))
-        self.recent_transactions_table.setColumnWidth(0, 100)
-        self.recent_transactions_table.setColumnWidth(1, 150)
-        self.recent_transactions_table.setColumnWidth(2, 120)
-        self.recent_transactions_table.setColumnWidth(3, 100)
-        self.recent_transactions_table.setColumnWidth(4, 200)
-        self.recent_transactions_table.setColumnWidth(5, 80)
-        for row, (id, date, account, person, category, amount, desc, category_type) in enumerate(recent_transactions):
-            shamsi_date = gregorian_to_shamsi(date)
-            self.recent_transactions_table.setItem(row, 0, QTableWidgetItem(shamsi_date))
-            self.recent_transactions_table.setItem(row, 1, QTableWidgetItem(account))
-            self.recent_transactions_table.setItem(row, 2, QTableWidgetItem(category))
-            self.recent_transactions_table.setItem(row, 3, QTableWidgetItem(format_number(amount)))
-            self.recent_transactions_table.setItem(row, 4, QTableWidgetItem(desc))
-            self.recent_transactions_table.setItem(row, 5, QTableWidgetItem("درآمد" if category_type == "income" else "هزینه"))
-
-        # به‌روزرسانی لیبل صفحه
+        # ۴. به‌روزرسانی وضعیت دکمه‌های صفحه‌بندی
         self.transactions_page_label.setText(f"صفحه {self.transactions_current_page} از {self.transactions_total_pages}")
         self.transactions_prev_btn.setEnabled(self.transactions_current_page > 1)
         self.transactions_next_btn.setEnabled(self.transactions_current_page < self.transactions_total_pages)
-
-        self.recent_page_label.setText(f"صفحه {self.recent_current_page} از {self.recent_total_pages}")
-        self.recent_prev_btn.setEnabled(self.recent_current_page > 1)
-        self.recent_next_btn.setEnabled(self.recent_current_page < self.recent_total_pages)
     
     def delete_transaction(self, transaction_id):
         # دریافت اطلاعات تراکنش برای معکوس کردن اثر آن
@@ -3186,20 +2834,10 @@ class FinanceApp(QMainWindow):
             # به‌روزرسانی جداول و داشبورد
             self.load_transactions()
             self.load_accounts()
-            self.update_dashboard()
+            self.dashboard_tab.update_dashboard()
             QMessageBox.information(self, "موفق", "تراکنش با موفقیت حذف شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def prev_recent_page(self):
-        if self.recent_current_page > 1:
-            self.recent_current_page -= 1
-            self.load_transactions()
-
-    def next_recent_page(self):
-        if self.recent_current_page < self.recent_total_pages:
-            self.recent_current_page += 1
-            self.load_transactions()
 
     def prev_transactions_page(self):
         if self.transactions_current_page > 1:
@@ -3227,11 +2865,11 @@ class FinanceApp(QMainWindow):
 
         due_date = None
         if shamsi_due_date:
-            if not is_valid_shamsi_date(shamsi_due_date):
+            if not utils.is_valid_shamsi_date(shamsi_due_date):
                 QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
                 return
             try:
-                due_date = shamsi_to_gregorian(shamsi_due_date)
+                due_date = utils.shamsi_to_gregorian(shamsi_due_date)
                 if not due_date:
                     QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                     return
@@ -3307,17 +2945,17 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
+                display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
                 edit_account.addItem(display_text, acc_id)
             if account_id:
-                edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+                edit_account.setCurrentText([f"{name} (موجودی: {utils.format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
             edit_account.setEnabled(bool(account_id))  # فعال/غیرفعال بر اساس وجود account_id
 
             edit_has_payment = QCheckBox("آیا پولی دریافت/پرداخت شده؟")
             edit_has_payment.setChecked(bool(account_id))
             edit_has_payment.stateChanged.connect(lambda state: edit_account.setEnabled(state == Qt.CheckState.Checked.value))
 
-            edit_due_date = QLineEdit(gregorian_to_shamsi(due_date) if due_date else "")
+            edit_due_date = QLineEdit(utils.gregorian_to_shamsi(due_date) if due_date else "")
             edit_due_date.setReadOnly(True)
             edit_due_date.setPlaceholderText("1404/02/13")
             edit_due_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_due_date)
@@ -3365,11 +3003,11 @@ class FinanceApp(QMainWindow):
 
         due_date = None
         if shamsi_due_date:
-            if not is_valid_shamsi_date(shamsi_due_date):
+            if not utils.is_valid_shamsi_date(shamsi_due_date):
                 QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
                 return
             try:
-                due_date = shamsi_to_gregorian(shamsi_due_date)
+                due_date = utils.shamsi_to_gregorian(shamsi_due_date)
                 if not due_date:
                     QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                     return
@@ -3462,11 +3100,11 @@ class FinanceApp(QMainWindow):
         self.debts_table.setColumnWidth(10, 80)  # ستون تسویه
 
         for row, (id, person, amount, paid, due_date, is_paid, account, is_credit, description) in enumerate(debts):
-            shamsi_due_date = gregorian_to_shamsi(due_date) if due_date else "-"
+            shamsi_due_date = utils.gregorian_to_shamsi(due_date) if due_date else "-"
             self.debts_table.setItem(row, 0, QTableWidgetItem(str(id)))
             self.debts_table.setItem(row, 1, QTableWidgetItem(person))
-            self.debts_table.setItem(row, 2, QTableWidgetItem(format_number(amount)))
-            self.debts_table.setItem(row, 3, QTableWidgetItem(format_number(paid)))
+            self.debts_table.setItem(row, 2, QTableWidgetItem(utils.format_number(amount)))
+            self.debts_table.setItem(row, 3, QTableWidgetItem(utils.format_number(paid)))
             self.debts_table.setItem(row, 4, QTableWidgetItem(shamsi_due_date))
             self.debts_table.setItem(row, 5, QTableWidgetItem("پرداخت شده" if is_paid else "در جریان"))
             self.debts_table.setItem(row, 6, QTableWidgetItem(account))
@@ -3541,7 +3179,7 @@ class FinanceApp(QMainWindow):
             layout.addRow("نوع:", type_label)
 
             # مبلغ باقی‌مانده
-            remaining_label = QLabel(format_number(remaining_amount))
+            remaining_label = QLabel(utils.format_number(remaining_amount))
             layout.addRow("مبلغ باقی‌مانده:", remaining_label)
 
             # چک‌باکس جدید
@@ -3565,7 +3203,7 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
+                display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
                 self.settle_account_combo.addItem(display_text, acc_id)
             if account_id:  # اگه قبلاً حسابی انتخاب شده بود، اون رو پیش‌فرض قرار بده
                 for i in range(self.settle_account_combo.count()):
@@ -3670,7 +3308,7 @@ class FinanceApp(QMainWindow):
                 self.db_manager.execute('SELECT name FROM persons WHERE id = ?', (person_id,))
                 person_name = self.db_manager.fetchone()[0]
 
-                description = f"تسویه {format_number(payment_amount)} از {'طلب' if is_credit else 'بدهی'} با شخص {person_name}"
+                description = f"تسویه {utils.format_number(payment_amount)} از {'طلب' if is_credit else 'بدهی'} با شخص {person_name}"
                 self.db_manager.execute(
                     "INSERT INTO transactions (account_id, person_id, category_id, amount, date, description) VALUES (?, ?, ?, ?, ?, ?)",
                     (account_id, person_id, category_id_from_db, payment_amount, today_gregorian, description)
@@ -3691,9 +3329,9 @@ class FinanceApp(QMainWindow):
             self.db_manager.commit()
             self.load_debts()
             self.load_accounts()
-            self.update_dashboard()
+            self.dashboard_tab.update_dashboard()
             dialog.accept()
-            QMessageBox.information(self, "موفق", f"پرداخت به مبلغ {format_number(payment_amount)} ریال ثبت شد! وضعیت تسویه: {'کامل' if is_paid else 'جزئی'}")
+            QMessageBox.information(self, "موفق", f"پرداخت به مبلغ {utils.format_number(payment_amount)} ریال ثبت شد! وضعیت تسویه: {'کامل' if is_paid else 'جزئی'}")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             self.db_manager.rollback() # اطمینان از rollback در صورت بروز خطا
@@ -3733,7 +3371,7 @@ class FinanceApp(QMainWindow):
             self.db_manager.commit()
             self.load_debts()
             self.load_accounts()
-            self.update_dashboard()
+            self.dashboard_tab.update_dashboard()
             dialog.accept()
             QMessageBox.information(self, "موفق", "بدهی/طلب با موفقیت تسویه شد!")
         except sqlite3.Error as e:
@@ -3772,7 +3410,7 @@ class FinanceApp(QMainWindow):
             # به‌روزرسانی جدول و حساب‌ها
             self.load_debts()
             self.load_accounts()
-            self.update_dashboard()
+            self.dashboard_tab.update_dashboard()
             QMessageBox.information(self, "موفق", "بدهی/طلب با موفقیت حذف شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
@@ -3848,7 +3486,7 @@ class FinanceApp(QMainWindow):
         if not installment_amount:
             QMessageBox.warning(self, "خطا", "مبلغ قسط نمی‌تواند خالی باشد!")
             return
-        if not is_valid_shamsi_date(start_date_shamsi):
+        if not utils.is_valid_shamsi_date(start_date_shamsi):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         if installments_paid > installments_total:
@@ -3856,7 +3494,7 @@ class FinanceApp(QMainWindow):
             return
 
         try:
-            start_date_gregorian = shamsi_to_gregorian(start_date_shamsi)
+            start_date_gregorian = utils.shamsi_to_gregorian(start_date_shamsi)
             if not start_date_gregorian:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -3913,7 +3551,7 @@ class FinanceApp(QMainWindow):
                         due_jdate = jdatetime.date(new_year, new_month, days_in_target_month)
 
                 due_date_shamsi = due_jdate.strftime("%Y/%m/%d")
-                due_date_gregorian = shamsi_to_gregorian(due_date_shamsi)
+                due_date_gregorian = utils.shamsi_to_gregorian(due_date_shamsi)
                 is_paid = 1 if i < installments_paid else 0
                 
                 self.db_manager.execute(
@@ -3975,12 +3613,12 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
+                display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
                 edit_account.addItem(display_text, acc_id)
             if account_id:
-                edit_account.setCurrentText([f"{name} (موجودی: {format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
+                edit_account.setCurrentText([f"{name} (موجودی: {utils.format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
             
-            edit_start_date = QLineEdit(gregorian_to_shamsi(start_date) if start_date else "")
+            edit_start_date = QLineEdit(utils.gregorian_to_shamsi(start_date) if start_date else "")
             edit_start_date.setReadOnly(True)
             edit_start_date.setPlaceholderText("1404/02/13")
             edit_start_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_start_date)
@@ -4115,7 +3753,7 @@ class FinanceApp(QMainWindow):
         if not installment_amount:
             QMessageBox.warning(self, "خطا", "مبلغ قسط نمی‌تواند خالی باشد!")
             return
-        if not is_valid_shamsi_date(start_date_shamsi):
+        if not utils.is_valid_shamsi_date(start_date_shamsi):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         if installments_paid > installments_total:
@@ -4133,7 +3771,7 @@ class FinanceApp(QMainWindow):
              return
 
         try:
-            start_date_gregorian = shamsi_to_gregorian(start_date_shamsi)
+            start_date_gregorian = utils.shamsi_to_gregorian(start_date_shamsi)
             if not start_date_gregorian:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -4203,7 +3841,7 @@ class FinanceApp(QMainWindow):
                         due_jdate = jdatetime.date(new_year, new_month, days_in_target_month)
 
                 due_date_shamsi = due_jdate.strftime("%Y/%m/%d")
-                due_date_gregorian = shamsi_to_gregorian(due_date_shamsi)
+                due_date_gregorian = utils.shamsi_to_gregorian(due_date_shamsi)
                 is_paid = 1 if i < installments_paid else 0
                 
                 self.db_manager.execute(
@@ -4242,13 +3880,13 @@ class FinanceApp(QMainWindow):
                 self.loans_table.setItem(row, 0, QTableWidgetItem(str(id)))
                 self.loans_table.setItem(row, 1, QTableWidgetItem("گرفته‌شده" if loan_type == "taken" else "داده‌شده"))
                 self.loans_table.setItem(row, 2, QTableWidgetItem(bank_name))
-                self.loans_table.setItem(row, 3, QTableWidgetItem(format_number(total_amount)))
-                self.loans_table.setItem(row, 4, QTableWidgetItem(format_number(paid_amount)))
+                self.loans_table.setItem(row, 3, QTableWidgetItem(utils.format_number(total_amount)))
+                self.loans_table.setItem(row, 4, QTableWidgetItem(utils.format_number(paid_amount)))
                 self.loans_table.setItem(row, 5, QTableWidgetItem(str(interest_rate)))
-                self.loans_table.setItem(row, 6, QTableWidgetItem(gregorian_to_shamsi(start_date)))
+                self.loans_table.setItem(row, 6, QTableWidgetItem(utils.gregorian_to_shamsi(start_date)))
                 self.loans_table.setItem(row, 7, QTableWidgetItem(str(installments_total)))
                 self.loans_table.setItem(row, 8, QTableWidgetItem(str(installments_paid)))
-                self.loans_table.setItem(row, 9, QTableWidgetItem(format_number(installment_amount) if installment_amount is not None else "0"))
+                self.loans_table.setItem(row, 9, QTableWidgetItem(utils.format_number(installment_amount) if installment_amount is not None else "0"))
                 edit_btn = QPushButton("ویرایش")
                 edit_btn.clicked.connect(lambda checked, l_id=id: self.edit_loan(l_id))
                 self.loans_table.setCellWidget(row, 10, edit_btn)
@@ -4292,8 +3930,8 @@ class FinanceApp(QMainWindow):
             table.setRowCount(len(installments))
             for row, (id, amount, due_date, is_paid) in enumerate(installments):
                 table.setItem(row, 0, QTableWidgetItem(str(id)))
-                table.setItem(row, 1, QTableWidgetItem(format_number(amount)))
-                table.setItem(row, 2, QTableWidgetItem(gregorian_to_shamsi(due_date)))
+                table.setItem(row, 1, QTableWidgetItem(utils.format_number(amount)))
+                table.setItem(row, 2, QTableWidgetItem(utils.gregorian_to_shamsi(due_date)))
                 table.setItem(row, 3, QTableWidgetItem("پرداخت‌شده" if is_paid else "پرداخت‌نشده"))
                 if not is_paid:
                     edit_btn = QPushButton("ویرایش")
@@ -4333,7 +3971,7 @@ class FinanceApp(QMainWindow):
             layout = QFormLayout()
             edit_amount = NumberInput()
             edit_amount.setText(str(amount))
-            edit_due_date = QLineEdit(gregorian_to_shamsi(due_date))
+            edit_due_date = QLineEdit(utils.gregorian_to_shamsi(due_date))
             edit_due_date.setReadOnly(True)
             edit_due_date.setPlaceholderText("1404/02/13")
             edit_due_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_due_date)
@@ -4354,11 +3992,11 @@ class FinanceApp(QMainWindow):
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ قسط نمی‌تواند خالی باشد!")
             return
-        if not is_valid_shamsi_date(due_date):
+        if not utils.is_valid_shamsi_date(due_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         try:
-            date = shamsi_to_gregorian(due_date)
+            date = utils.shamsi_to_gregorian(due_date)
             if not date:
                 QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                 return
@@ -4398,7 +4036,7 @@ class FinanceApp(QMainWindow):
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
             for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {format_number(balance)} ریال)"
+                display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
                 account_combo.addItem(display_text, acc_id)
             save_btn = QPushButton("تسویه")
             save_btn.clicked.connect(lambda: self.confirm_settle_installment(
@@ -4493,8 +4131,8 @@ class FinanceApp(QMainWindow):
             installments_table.setRowCount(len(installments))
             for row, (inst_id, amount, due_date, is_paid) in enumerate(installments):
                 installments_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-                installments_table.setItem(row, 1, QTableWidgetItem(format_number(amount)))
-                installments_table.setItem(row, 2, QTableWidgetItem(gregorian_to_shamsi(due_date)))
+                installments_table.setItem(row, 1, QTableWidgetItem(utils.format_number(amount)))
+                installments_table.setItem(row, 2, QTableWidgetItem(utils.gregorian_to_shamsi(due_date)))
                 installments_table.setItem(row, 3, QTableWidgetItem("بله" if is_paid else "خیر"))
                 if not is_paid:
                     btn_pay = QPushButton("پرداخت")
@@ -4633,171 +4271,17 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def update_dashboard(self):
-        try:
-            # به‌روزرسانی موجودی کل
-            self.db_manager.execute("SELECT SUM(balance) FROM accounts")
-            total_balance = self.db_manager.fetchone()[0] or 0
-            self.total_balance_label.setText(f"موجودی کل: {format_number(total_balance)} ریال")
-
-            # بارگذاری بدهی‌ها و طلب‌های مهم
-            today = jdatetime.date.today()
-            fifteen_days_later = today + jdatetime.timedelta(days=15)
-            today_str = today.togregorian().strftime("%Y-%m-%d")
-            fifteen_days_later_str = fifteen_days_later.togregorian().strftime("%Y-%m-%d")
-
-            self.db_manager.execute(
-                "SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, d.is_paid, COALESCE(a.name, '-') "
-                "FROM debts d JOIN persons p ON d.person_id = p.id LEFT JOIN accounts a ON d.account_id = a.id "
-                "WHERE d.show_in_dashboard = 1 AND d.is_paid = 0 AND d.due_date IS NOT NULL "
-                "AND (d.due_date <= ? OR (d.due_date >= ? AND d.due_date <= ?))",
-                (today_str, today_str, fifteen_days_later_str)
-            )
-            debts = self.db_manager.fetchall()
-
-            # دیباگ: چاپ نوع و مقدار debts
-            #print(f"Type of debts: {type(debts)}, Value: {debts}")
-            # مطمئن شدن از اینکه debts یه لیست یا تاپل هست
-            if not isinstance(debts, (list, tuple)):
-                #print(f"Error: Expected a list for debts, got {type(debts)}")
-                debts = []
-
-            self.important_debts_table.setRowCount(len(debts))
-            for row, (id, person, amount, paid, due_date, is_paid, account) in enumerate(debts):
-                shamsi_due_date = gregorian_to_shamsi(due_date) if due_date else "-"
-                self.important_debts_table.setItem(row, 0, QTableWidgetItem(person))
-                self.important_debts_table.setItem(row, 1, QTableWidgetItem(format_number(amount)))
-                self.important_debts_table.setItem(row, 2, QTableWidgetItem(format_number(paid)))
-                self.important_debts_table.setItem(row, 3, QTableWidgetItem(shamsi_due_date))
-                self.important_debts_table.setItem(row, 4, QTableWidgetItem("پرداخت شده" if is_paid else "در جریان"))
-
-            # آپدیت آمار ماه جاری
-            expenses = self.get_current_month_expenses()
-            income = self.get_current_month_income()
-            balance = self.get_current_month_balance()
-            credits = self.get_current_month_credits()
-            debts_value = self.get_current_month_debts()
-            
-            self.expenses_value.setText(f"{format_number(expenses)} ریال")
-            self.income_value.setText(f"{format_number(income)} ریال")
-            self.balance_value.setText(f"{format_number(balance)} ریال")
-            self.credits_value.setText(f"{format_number(credits)} ریال")
-            self.debts_value.setText(f"{format_number(debts_value)} ریال")
-
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def get_current_month_expenses(self):
-        today = jdatetime.date.today()
-        start_of_month = jdatetime.date(today.year, today.month, 1).togregorian()
-        next_month = today.month + 1 if today.month < 12 else 1
-        next_year = today.year + 1 if today.month == 12 else today.year
-        end_of_month = (jdatetime.date(next_year, next_month, 1) - jdatetime.timedelta(days=1)).togregorian()
-        self.db_manager.execute(
-            """
-            SELECT COALESCE(SUM(t.amount), 0)
-            FROM transactions t
-            JOIN categories c ON t.category_id = c.id
-            WHERE c.type = 'expense' AND t.date BETWEEN ? AND ?
-            """,
-            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
-        )
-        return self.db_manager.fetchone()[0]
-
-    def get_current_month_income(self):
-        today = jdatetime.date.today()
-        start_of_month = jdatetime.date(today.year, today.month, 1).togregorian()
-        next_month = today.month + 1 if today.month < 12 else 1
-        next_year = today.year + 1 if today.month == 12 else today.year
-        end_of_month = (jdatetime.date(next_year, next_month, 1) - jdatetime.timedelta(days=1)).togregorian()
-        self.db_manager.execute(
-            """
-            SELECT COALESCE(SUM(t.amount), 0)
-            FROM transactions t
-            JOIN categories c ON t.category_id = c.id
-            WHERE c.type = 'income' AND t.date BETWEEN ? AND ?
-            """,
-            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
-        )
-        return self.db_manager.fetchone()[0]
-
-    def get_current_month_balance(self):
-        income = self.get_current_month_income()
-        expenses = self.get_current_month_expenses()
-        return income - expenses
-
-    def get_current_month_credits(self):
-        today = jdatetime.date.today()
-        start_of_month = jdatetime.date(today.year, today.month, 1).togregorian()
-        next_month = today.month + 1 if today.month < 12 else 1
-        next_year = today.year + 1 if today.month == 12 else today.year
-        end_of_month = (jdatetime.date(next_year, next_month, 1) - jdatetime.timedelta(days=1)).togregorian()
-        self.db_manager.execute(
-            """
-            SELECT COALESCE(SUM(amount - paid_amount), 0)
-            FROM debts
-            WHERE is_credit = 1 AND is_paid = 0 AND due_date BETWEEN ? AND ?
-            """,
-            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
-        )
-        return self.db_manager.fetchone()[0]
-
-    def get_current_month_debts(self):
-        today = jdatetime.date.today()
-        start_of_month = jdatetime.date(today.year, today.month, 1).togregorian()
-        next_month = today.month + 1 if today.month < 12 else 1
-        next_year = today.year + 1 if today.month == 12 else today.year
-        end_of_month = (jdatetime.date(next_year, next_month, 1) - jdatetime.timedelta(days=1)).togregorian()
-        
-        # دیباگ: چاپ بازه تاریخ
-        #print(f"get_current_month_debts: start_of_month = {start_of_month.strftime('%Y-%m-%d')}, end_of_month = {end_of_month.strftime('%Y-%m-%d')}")
-        
-        # دیباگ: چک کردن تعداد بدهی‌های پرداخت‌نشده
-        self.db_manager.execute(
-            """
-            SELECT COUNT(*)
-            FROM debts
-            WHERE is_credit = 0 AND is_paid = 0
-            """
-        )
-        debt_count = self.db_manager.fetchone()[0]
-        #print(f"get_current_month_debts: Total unpaid debts (is_credit = 0) = {debt_count}")
-        
-        # دیباگ: چک کردن بدهی‌هایی که due_date در بازه ماه جاری دارن
-        self.db_manager.execute(
-            """
-            SELECT COUNT(*)
-            FROM debts
-            WHERE is_credit = 0 AND is_paid = 0 AND due_date BETWEEN ? AND ?
-            """,
-            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
-        )
-        matching_debt_count = self.db_manager.fetchone()[0]
-        #print(f"get_current_month_debts: Unpaid debts in current month = {matching_debt_count}")
-        
-        # کوئری اصلی
-        self.db_manager.execute(
-            """
-            SELECT COALESCE(SUM(amount - paid_amount), 0)
-            FROM debts
-            WHERE is_credit = 0 AND is_paid = 0 AND due_date BETWEEN ? AND ?
-            """,
-            (start_of_month.strftime("%Y-%m-%d"), end_of_month.strftime("%Y-%m-%d"))
-        )
-        result = self.db_manager.fetchone()[0]
-        #print(f"get_current_month_debts: Sum of unpaid debts = {result}")
-        return result
-
+  
     def check_reminders(self):
         today = jdatetime.date.today().togregorian().strftime("%Y-%m-%d")
         try:
             self.db_manager.execute("SELECT id, amount, due_date FROM debts WHERE is_paid = 0 AND due_date IS NOT NULL AND due_date <= ?", (today,))
             debts = self.db_manager.fetchall()
             for debt in debts:
-                QMessageBox.warning(self, "یادآوری", f"بدهی به مبلغ {format_number(debt[1])} ریال تا {gregorian_to_shamsi(debt[2])} سررسید شده!")
+                QMessageBox.warning(self, "یادآوری", f"بدهی به مبلغ {utils.format_number(debt[1])} ریال تا {utils.gregorian_to_shamsi(debt[2])} سررسید شده!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
+            
     def generate_custom_report(self):
         start_date = self.report_date_start.text()
         end_date = self.report_date_end.text()
@@ -4806,15 +4290,15 @@ class FinanceApp(QMainWindow):
         if not start_date or not end_date:
             QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
             return
-        if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
+        if not utils.is_valid_shamsi_date(start_date) or not utils.is_valid_shamsi_date(end_date):
             QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
             return
         try:
-            start_date_g = shamsi_to_gregorian(start_date)
+            start_date_g = utils.shamsi_to_gregorian(start_date)
             if not start_date_g:
                     QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                     return
-            end_date_g = shamsi_to_gregorian(end_date)
+            end_date_g = utils.shamsi_to_gregorian(end_date)
             if not end_date_g:
                     QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
                     return
@@ -4898,17 +4382,17 @@ class FinanceApp(QMainWindow):
                     report_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
                     report_table.setRowCount(len(results))
                     for row, result in enumerate(results):
-                        shamsi_date = gregorian_to_shamsi(result[0])
+                        shamsi_date = utils.gregorian_to_shamsi(result[0])
                         report_table.setItem(row, 0, QTableWidgetItem(shamsi_date))
                         report_table.setItem(row, 1, QTableWidgetItem(result[1] or "-"))
                         if column_count == 6:
                             report_table.setItem(row, 2, QTableWidgetItem(result[2] or "-"))
                             report_table.setItem(row, 3, QTableWidgetItem(result[3]))
-                            report_table.setItem(row, 4, QTableWidgetItem(format_number(result[4])))
+                            report_table.setItem(row, 4, QTableWidgetItem(utils.format_number(result[4])))
                             report_table.setItem(row, 5, QTableWidgetItem(result[5] or "-"))
                         else:
                             report_table.setItem(row, 2, QTableWidgetItem(result[2]))
-                            report_table.setItem(row, 3, QTableWidgetItem(format_number(result[3])))
+                            report_table.setItem(row, 3, QTableWidgetItem(utils.format_number(result[3])))
                             report_table.setItem(row, 4, QTableWidgetItem(result[4] or "-"))
                 else:
                     report_table.setColumnCount(5)
@@ -4916,11 +4400,11 @@ class FinanceApp(QMainWindow):
                     report_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
                     report_table.setRowCount(len(results))
                     for row, result in enumerate(results):
-                        shamsi_date = gregorian_to_shamsi(result[0])
+                        shamsi_date = utils.gregorian_to_shamsi(result[0])
                         report_table.setItem(row, 0, QTableWidgetItem(shamsi_date))
                         report_table.setItem(row, 1, QTableWidgetItem(result[1]))
-                        report_table.setItem(row, 2, QTableWidgetItem(format_number(result[2])))
-                        report_table.setItem(row, 3, QTableWidgetItem(format_number(result[3])))
+                        report_table.setItem(row, 2, QTableWidgetItem(utils.format_number(result[2])))
+                        report_table.setItem(row, 3, QTableWidgetItem(utils.format_number(result[3])))
                         report_table.setItem(row, 4, QTableWidgetItem("پرداخت شده" if result[4] else "در جریان"))
 
                 layout.addWidget(report_table)
@@ -4931,6 +4415,7 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
+    
     def closeEvent(self, event):
         self.db_manager.close()
         event.accept()
