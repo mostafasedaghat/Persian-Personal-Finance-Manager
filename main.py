@@ -35,7 +35,7 @@ from change_password_dialog import ChangePasswordDialog
 from ui.components.custom_widgets import NumberInput, PersianCalendarPopup, PersianCalendarWidget
 from core import utils
 from ui.tabs.dashboard_tab import DashboardTab
-
+from ui.tabs.accounts_tab import AccountsTab
 
 # تنظیم locale برای جداکننده اعداد
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
@@ -277,8 +277,9 @@ class FinanceApp(QMainWindow):
         tabs.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         self.dashboard_tab = DashboardTab(self.db_manager)
-
-        accounts_tab = self.create_accounts_tab()
+        # استفاده از کلاس جدید برای ساخت تب حساب‌ها و پاس دادن db_manager و self
+        self.accounts_tab_widget = AccountsTab(self.db_manager, self)
+        
         transactions_tab = self.create_transactions_tab()
         debts_tab = self.create_debts_tab()
         loans_tab = self.create_loans_tab()
@@ -288,13 +289,13 @@ class FinanceApp(QMainWindow):
         settings_tab = self.create_settings_tab()
 
         tabs.addTab(self.dashboard_tab, "داشبورد")
-        tabs.addTab(accounts_tab, "حساب‌ها")
+        tabs.addTab(self.accounts_tab_widget, "حساب‌ها") # افزودن تب مستقل
         tabs.addTab(transactions_tab, "تراکنش‌ها")
         tabs.addTab(debts_tab, "بدهی/طلب")
         tabs.addTab(loans_tab, "وام‌ها")
         tabs.addTab(reports_tab, "گزارش‌ها")
         tabs.addTab(persons_tab, "اشخاص")
-        tabs.addTab(categories_tab, "دسته‌بندی‌ها")
+        tabs.addTab(categories_tab, "دسته بندی‌ها")
         tabs.addTab(settings_tab, "تنظیمات")
 
         tabs.currentChanged.connect(self.on_tab_changed)
@@ -312,30 +313,7 @@ class FinanceApp(QMainWindow):
         dialog = ChangePasswordDialog(self.db_manager, username, self)
         dialog.exec()
 
-    def create_accounts_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-        form_layout = QFormLayout()
-        self.account_name_input = QLineEdit()
-        self.account_balance_input = NumberInput()  # جایگزینی با NumberInput
-        add_account_btn = QPushButton("افزودن حساب")
-        add_account_btn.clicked.connect(self.add_account)
-        form_layout.addRow("نام حساب:", self.account_name_input)
-        form_layout.addRow("موجودی اولیه:", self.account_balance_input)
-        form_layout.addRow(add_account_btn)
-        self.accounts_table = QTableWidget()
-        self.accounts_table.setColumnCount(4)  # اضافه کردن ستون اقدامات
-        self.accounts_table.setHorizontalHeaderLabels(["شناسه", "نام حساب", "موجودی", "اقدامات"])
-        self.accounts_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.accounts_table.setColumnWidth(0, 50)   # شناسه
-        self.accounts_table.setColumnWidth(1, 200)  # نام حساب
-        self.accounts_table.setColumnWidth(2, 150)  # موجودی
-        self.accounts_table.setColumnWidth(3, 80)   # اقدامات
-        layout.addLayout(form_layout)
-        layout.addWidget(self.accounts_table)
-        tab.setLayout(layout)
-        return tab
-
+   
     # اصلاح متد create_transactions_tab
     def create_transactions_tab(self):
         tab = QWidget()
@@ -2271,88 +2249,32 @@ class FinanceApp(QMainWindow):
         self.dashboard_tab.update_dashboard()
 
     def load_accounts(self):
+        """نسخه جدید: پر کردن کامبوباکس‌ها و دستور آپدیت به تب حساب‌ها"""
         try:
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
             accounts = self.db_manager.fetchall()
-            self.accounts_table.setRowCount(len(accounts))
+            
+            # پاک کردن کامبوباکس‌های مرتبط با حساب در سایر تب‌ها
             self.transaction_account.clear()
             self.debt_account.clear()
             self.loan_account.clear()
             self.transfer_from_account.clear()
             self.transfer_to_account.clear()
-            for row, (id, name, balance) in enumerate(accounts):
-                self.accounts_table.setItem(row, 0, QTableWidgetItem(str(id)))
-                self.accounts_table.setItem(row, 1, QTableWidgetItem(name))
-                self.accounts_table.setItem(row, 2, QTableWidgetItem(utils.format_number(balance)))
-                # اضافه کردن دکمه ویرایش
-                edit_btn = QPushButton("ویرایش")
-                edit_btn.clicked.connect(lambda checked, acc_id=id: self.edit_account(acc_id))
-                self.accounts_table.setCellWidget(row, 3, edit_btn)
-                # پر کردن لیست‌های کشویی
+            
+            for id, name, balance in accounts:
                 display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
                 self.transaction_account.addItem(display_text, id)
                 self.debt_account.addItem(display_text, id)
                 self.loan_account.addItem(display_text, id)
                 self.transfer_from_account.addItem(display_text, id)
                 self.transfer_to_account.addItem(display_text, id)
+                
+            # آپدیت کردن جدول داخل فایل جداگانه حساب‌ها
+            if hasattr(self, 'accounts_tab_widget'):
+                self.accounts_tab_widget.load_accounts_table()
+                
         except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def add_account(self):
-        name = self.account_name_input.text()
-        balance = self.account_balance_input.get_raw_value() if self.account_balance_input.text() else 0
-        if not name:
-            QMessageBox.warning(self, "خطا", "نام حساب نمی‌تواند خالی باشد!")
-            return
-        try:
-            self.db_manager.execute("INSERT INTO accounts (name, balance) VALUES (?, ?)", (name, balance))
-            self.db_manager.commit()
-            self.account_name_input.clear()
-            self.account_balance_input.clear()
-            self.load_accounts()
-            QMessageBox.information(self, "موفق", "حساب با موفقیت افزوده شد!")
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def edit_account(self, account_id):
-        try:
-            self.db_manager.execute("SELECT name FROM accounts WHERE id = ?", (account_id,))
-            account = self.db_manager.fetchone()
-            if not account:
-                QMessageBox.warning(self, "خطا", "حساب یافت نشد!")
-                return
-            name = account[0]
-
-            dialog = QDialog(self)
-            dialog.setWindowTitle("ویرایش نام حساب")
-            layout = QFormLayout()
-            edit_name = QLineEdit(name)
-            save_btn = QPushButton("ذخیره")
-            save_btn.clicked.connect(lambda: self.save_account(account_id, edit_name.text(), dialog))
-            layout.addRow("نام حساب:", edit_name)
-            layout.addRow(save_btn)
-            dialog.setLayout(layout)
-            dialog.exec()
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def save_account(self, account_id, name, dialog):
-        if not name:
-            QMessageBox.warning(self, "خطا", "نام حساب نمی‌تواند خالی باشد!")
-            return
-        try:
-            # بررسی تکراری نبودن نام حساب
-            self.db_manager.execute("SELECT id FROM accounts WHERE name = ? AND id != ?", (name, account_id))
-            if self.db_manager.fetchone():
-                QMessageBox.warning(self, "خطا", "حسابی با این نام قبلاً وجود دارد!")
-                return
-            self.db_manager.execute("UPDATE accounts SET name = ? WHERE id = ?", (name, account_id))
-            self.db_manager.commit()
-            self.load_accounts()
-            dialog.accept()
-            QMessageBox.information(self, "موفق", "نام حساب با موفقیت ویرایش شد!")
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده در بارگذاری حساب‌ها: {e}")
 
     def update_categories(self):
         """به‌روزرسانی لیست دسته‌بندی‌ها بر اساس نوع تراکنش"""
