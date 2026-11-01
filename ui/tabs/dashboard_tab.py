@@ -12,7 +12,7 @@ ui/tabs/dashboard_tab.py
     │  ۵ کارت آمار ماه جاری (هزینه، درآمد، تراز، طلب، بدهی)        │
     ├───────────────────────────────┬──────────────────────────────┤
     │  📜 تراکنش‌های اخیر (چپ)       │ 💸 بدهی و طلب‌های مهم (راست) │
-    │  جدول + صفحه‌بندی              │ جمع بدهی/طلب + جدول رنگی     │
+    │  فقط ۵۰ تراکنش آخر            │ جمع بدهی/طلب + جدول رنگی     │
     └───────────────────────────────┴──────────────────────────────┘
 
 نکته مهم درباره جهت چیدمان:
@@ -33,7 +33,7 @@ import jdatetime
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView,
     QAbstractItemView, QGraphicsDropShadowEffect,
 )
@@ -178,31 +178,6 @@ class DashboardTab(QWidget):
         border-bottom: 2px solid #e2e8f0;
     }}
 
-    /* ---------- صفحه‌بندی ---------- */
-    QPushButton#pageBtn {{
-        background-color: #ffffff;
-        color: #166534;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        padding: 6px 14px;
-        font-weight: bold;
-        font-size: 12px;
-    }}
-    QPushButton#pageBtn:hover {{
-        background-color: #f0fdf4;
-        border-color: #16a34a;
-    }}
-    QPushButton#pageBtn:disabled {{
-        color: #94a3b8;
-        background-color: #f8fafc;
-        border-color: #e2e8f0;
-    }}
-    QLabel#pageLabel {{
-        color: {SLATE};
-        font-size: 12px;
-        font-weight: bold;
-    }}
-
     /* ---------- حالت خالی ---------- */
     QLabel#emptyLabel {{
         background-color: #f8fafc;
@@ -218,10 +193,10 @@ class DashboardTab(QWidget):
         super().__init__(parent)
         self.db_manager = db_manager
 
-        # وضعیت صفحه‌بندی تراکنش‌های اخیر
-        self.recent_current_page = 1
+        # فقط ۵۰ تراکنش آخر در داشبورد نمایش داده می‌شود (بدون صفحه‌بندی
+        # و بدون شمارش کل جدول) تا این تب همیشه سریع بارگذاری شود؛
+        # مرور کامل تاریخچه در تب «تراکنش‌ها» انجام می‌شود.
         self.recent_per_page = 50
-        self.recent_total_pages = 1
 
         # جهت چیدمان راست‌به‌چپ (مطابق کل برنامه)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -426,7 +401,9 @@ class DashboardTab(QWidget):
         self.important_debts_table.setColumnCount(5)
         self.important_debts_table.setHorizontalHeaderLabels(
             ["شخص", "نوع", "مبلغ", "باقی‌مانده", "سررسید"])
-        self._style_table(self.important_debts_table, stretch_column=0)
+        # شخص(کش‌شونده) | نوع | مبلغ | باقی‌مانده | سررسید
+        self._style_table(self.important_debts_table,
+                          [None, 80, 130, 130, 130])
         self.important_debts_table.setMinimumHeight(380)
         lay.addWidget(self.important_debts_table, 1)
 
@@ -463,7 +440,7 @@ class DashboardTab(QWidget):
             f"background-color: {SOFT_GREEN}; font-size: 15px;")
         title = QLabel("تراکنش‌های اخیر")
         title.setObjectName("panelTitle")
-        self.recent_count_chip = QLabel("0 تراکنش")
+        self.recent_count_chip = QLabel("0 تراکنش اخیر")
         self.recent_count_chip.setObjectName("chip")
         self.recent_count_chip.setStyleSheet(
             f"background-color: {SOFT_SLATE}; color: {SLATE};")
@@ -479,7 +456,9 @@ class DashboardTab(QWidget):
         self.recent_transactions_table.setColumnCount(6)
         self.recent_transactions_table.setHorizontalHeaderLabels(
             ["تاریخ", "حساب", "دسته‌بندی", "مبلغ", "توضیحات", "نوع"])
-        self._style_table(self.recent_transactions_table, stretch_column=4)
+        # تاریخ | حساب | دسته‌بندی | مبلغ | توضیحات(کش‌شونده) | نوع
+        self._style_table(self.recent_transactions_table,
+                          [110, 130, 130, 130, None, 90])
         self.recent_transactions_table.setMinimumHeight(380)
         lay.addWidget(self.recent_transactions_table, 1)
 
@@ -490,28 +469,6 @@ class DashboardTab(QWidget):
         self.recent_empty_label.setVisible(False)
         lay.addWidget(self.recent_empty_label, 1)
 
-        # نوار صفحه‌بندی
-        pagination_layout = QHBoxLayout()
-        pagination_layout.setSpacing(8)
-        self.btn_prev_recent = QPushButton("صفحه قبل")
-        self.btn_prev_recent.setObjectName("pageBtn")
-        self.btn_next_recent = QPushButton("صفحه بعد")
-        self.btn_next_recent.setObjectName("pageBtn")
-        self.page_label = QLabel(f"صفحه {self.recent_current_page}")
-        self.page_label.setObjectName("pageLabel")
-        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # اتصال دکمه‌ها (رفع مشکل نسخه قبل که دکمه‌ها متصل نبودند)
-        self.btn_prev_recent.clicked.connect(self.prev_recent_page)
-        self.btn_next_recent.clicked.connect(self.next_recent_page)
-
-        pagination_layout.addStretch(1)
-        pagination_layout.addWidget(self.btn_prev_recent)
-        pagination_layout.addWidget(self.page_label)
-        pagination_layout.addWidget(self.btn_next_recent)
-        pagination_layout.addStretch(1)
-        lay.addLayout(pagination_layout)
-
         self._apply_shadow(card, blur=20, alpha=30, dy=4)
         self.recent_panel = card
         return card
@@ -519,8 +476,15 @@ class DashboardTab(QWidget):
     # ------------------------------------------------------------------ #
     # ابزارهای مشترک ساخت رابط کاربری
     # ------------------------------------------------------------------ #
-    def _style_table(self, table, stretch_column):
-        """تنظیمات ظاهری و رفتاری مشترک جدول‌های داشبورد."""
+    def _style_table(self, table, column_widths):
+        """تنظیمات ظاهری و رفتاری مشترک جدول‌های داشبورد.
+
+        نکته کارایی: به‌جای حالت «ResizeToContents» (که با هر setItem
+        کل جدول را دوباره اندازه‌گیری و چیدمان می‌کند و برای جدول‌های
+        داخل QScrollArea بسیار کند است) از عرض ثابت استفاده می‌شود.
+        ستونی که عرض آن «None» باشد کش‌شونده (Stretch) است و با
+        تغییر اندازه پنجره تنظیم می‌شود.
+        """
         table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         # مخفی‌کردن شماره ردیف‌ها برای ظاهری تمیزتر
@@ -539,12 +503,16 @@ class DashboardTab(QWidget):
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.setWordWrap(False)
 
-        # عرض ستون‌ها بر اساس محتوا + یک ستون کش‌شونده
+        # عرض ثابت ستون‌ها + ستون کش‌شونده (None)
         horizontal_header = table.horizontalHeader()
         horizontal_header.setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents)
-        horizontal_header.setSectionResizeMode(
-            stretch_column, QHeaderView.ResizeMode.Stretch)
+            QHeaderView.ResizeMode.Interactive)
+        for column, width in enumerate(column_widths):
+            if width is None:
+                horizontal_header.setSectionResizeMode(
+                    column, QHeaderView.ResizeMode.Stretch)
+            else:
+                table.setColumnWidth(column, width)
         horizontal_header.setStretchLastSection(False)
         horizontal_header.setMinimumSectionSize(64)
         horizontal_header.setDefaultAlignment(
@@ -739,29 +707,28 @@ class DashboardTab(QWidget):
     # تراکنش‌های اخیر
     # ------------------------------------------------------------------ #
     def load_recent_transactions(self):
-        try:
-            # ۱. تعداد کل تراکنش‌ها برای صفحه‌بندی
-            self.db_manager.execute("SELECT COUNT(*) FROM transactions")
-            total_transactions = self.db_manager.fetchone()[0]
-            self.recent_total_pages = (
-                total_transactions + self.recent_per_page - 1) // self.recent_per_page
-            if self.recent_total_pages == 0:
-                self.recent_total_pages = 1
+        """نمایش آخرین ۵۰ تراکنش ثبت‌شده.
 
-            # ۲. واکشی اطلاعات فقط برای صفحه فعلی
-            offset_recent = (self.recent_current_page - 1) * self.recent_per_page
+        برای سرعت بالا:
+          - بدون COUNT(*) روی کل جدول (در دیتابیس‌های بزرگ کند است)؛
+          - بدون صفحه‌بندی — فقط یک کوئری با LIMIT 50.
+        مرور و جستجوی کامل تاریخچه در تب «تراکنش‌ها» انجام می‌شود.
+        """
+        try:
+            # واکشی ۵۰ تراکنش آخر (جدیدترین‌ها در بالا)
             self.db_manager.execute(
                 "SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type "
                 "FROM transactions t "
                 "JOIN accounts a ON t.account_id = a.id "
                 "LEFT JOIN persons p ON t.person_id = p.id "
                 "JOIN categories c ON t.category_id = c.id "
-                "ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?",
-                (self.recent_per_page, offset_recent)
+                "ORDER BY t.date DESC, t.id DESC LIMIT ?",
+                (self.recent_per_page,)
             )
             recent_transactions = self.db_manager.fetchall()
 
-            self.recent_count_chip.setText(f"{total_transactions} تراکنش")
+            self.recent_count_chip.setText(
+                f"{len(recent_transactions)} تراکنش اخیر")
 
             # حالت خالی
             if not recent_transactions:
@@ -815,26 +782,9 @@ class DashboardTab(QWidget):
                             amount_item, desc_item, type_item]):
                         self.recent_transactions_table.setItem(row, column, item)
 
-            # ۳. وضعیت دکمه‌های صفحه‌بندی
-            self.page_label.setText(
-                f"صفحه {self.recent_current_page} از {self.recent_total_pages}")
-            self.btn_prev_recent.setEnabled(self.recent_current_page > 1)
-            self.btn_next_recent.setEnabled(
-                self.recent_current_page < self.recent_total_pages)
-
         except sqlite3.Error as e:
             QMessageBox.critical(
                 self, "خطا", f"خطای پایگاه داده در تراکنش‌های اخیر: {e}")
-
-    def next_recent_page(self):
-        if self.recent_current_page < getattr(self, 'recent_total_pages', 1):
-            self.recent_current_page += 1
-            self.load_recent_transactions()
-
-    def prev_recent_page(self):
-        if self.recent_current_page > 1:
-            self.recent_current_page -= 1
-            self.load_recent_transactions()
 
     # ================================================================== #
     # آمار ماه جاری

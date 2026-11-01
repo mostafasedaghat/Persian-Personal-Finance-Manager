@@ -19,8 +19,8 @@ import os
 import sys
 
 APP_NAME = "نرم‌افزار حسابداری شخصی"
-APP_VERSION = "2.1"
-APP_RELEASE_NAME = "مرکز گزارش‌ها"
+APP_VERSION = "2.2"
+APP_RELEASE_NAME = "داشبورد سریع"
 
 
 # ------------------------------------------------------------------ #

@@ -190,7 +190,14 @@ class FinanceApp(QMainWindow):
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 dropbox_token TEXT
-                );                    
+                );
+                -- شاخص‌های کارایی: مرتب‌سازی بر اساس تاریخ و جستجوهای بازه‌ای
+                -- در دیتابیس‌های بزرگ (ده‌ها هزار تراکنش) سرعت داشبورد و
+                -- تب تراکنش‌ها را به‌شدت افزایش می‌دهند.
+                CREATE INDEX IF NOT EXISTS idx_transactions_date
+                    ON transactions(date, id);
+                CREATE INDEX IF NOT EXISTS idx_debts_due_date
+                    ON debts(due_date);
             """)
             self.db_manager.commit()
 
