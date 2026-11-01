@@ -92,6 +92,12 @@ class TransactionsTab(QWidget):
     }}
 
     /* ---------- کارت‌ها ---------- */
+    /* رنگ پایه برای همه لیبل‌ها (شامل لیبل‌های خودکار فرم‌ها)؛
+       در ویندوز با تم تاریک، پالت سیستم متن لیبل‌های بی‌رنگ را سفید
+       می‌کند — این قانون صریح از آن جلوگیری می‌کند. */
+    QLabel {{
+        color: #1e293b;
+    }}
     QFrame#panelCard {{
         background-color: #ffffff;
         border: 1px solid {CARD_BORDER};
