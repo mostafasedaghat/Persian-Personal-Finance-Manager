@@ -33,7 +33,6 @@ ui/tabs/reports_tab.py
 
 import os
 import sqlite3
-import sys
 
 import jdatetime
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -668,8 +667,8 @@ class ReportsTab(QWidget):
     def _open_reports_folder(self):
         from PyQt6.QtCore import QUrl
         from PyQt6.QtGui import QDesktopServices
-        base = os.path.dirname(os.path.abspath(sys.argv[0])) or os.getcwd()
-        folder = os.path.join(base, "reports")
+        from core.paths import reports_dir
+        folder = reports_dir()
         os.makedirs(folder, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
@@ -954,19 +953,9 @@ class ReportsTab(QWidget):
             from arabic_reshaper import reshape
             from bidi.algorithm import get_display
 
-            # ثبت فونت وزیر برای متون فارسی نمودار
-            base = os.path.dirname(os.path.abspath(sys.argv[0])) or os.getcwd()
-            app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            for candidate in (os.path.join(base, "Vazir.ttf"),
-                              os.path.join(base, "assets", "Vazir.ttf"),
-                              os.path.join(app_root, "Vazir.ttf")):
-                if os.path.exists(candidate):
-                    try:
-                        font_manager.fontManager.addfont(candidate)
-                        rcParams["font.family"] = "Vazir"
-                    except Exception:
-                        pass
-                    break
+            # ثبت فونت وزیر برای متون فارسی نمودار (از ماژول مرکزی مسیرها)
+            from core.paths import register_matplotlib_font
+            register_matplotlib_font()
 
             fig = Figure(figsize=(8.8, 2.9), dpi=100, facecolor="white")
             ax = fig.add_subplot(111)

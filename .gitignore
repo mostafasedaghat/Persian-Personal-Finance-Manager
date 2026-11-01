@@ -75,9 +75,15 @@ crashlytics-build.properties
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 
 /[Aa]ssetBundles/*
-__pycache__/*
-__pycache__/*
-__pycache__/*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# خروجی‌ها و داده‌های محلی
 /[Dd]atabase-backup/*
 /[Rr]eports/*
 finance.db
+build/
+dist/*.spec.bak

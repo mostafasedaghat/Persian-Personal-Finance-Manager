@@ -1,6 +1,16 @@
-# database.py
+# -*- coding: utf-8 -*-
+"""
+core/database.py
+================
+لایه دسترسی به داده (SQLite).
+
+DatabaseManager یک پوشش سبک روی sqlite3 است که اتصال را به صورت
+تنبل (lazy) باز می‌کند و متدهای پرتکرار execute/executescript/
+fetchone/fetchall/commit/rollback/close را فراهم می‌کند.
+"""
 
 import sqlite3
+
 
 class DatabaseManager:
     def __init__(self, db_path='finance.db'):

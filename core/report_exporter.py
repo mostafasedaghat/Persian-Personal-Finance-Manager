@@ -40,9 +40,7 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.pdfmetrics import getRegisteredFontNames, registerFont
-from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.pdfmetrics import getRegisteredFontNames
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from arabic_reshaper import reshape
 from bidi.algorithm import get_display
@@ -51,6 +49,7 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QDialog, QLabel, QMessageBox, QPushButton, QVBoxLayout
 
 from core.utils import format_amount, gregorian_to_shamsi
+from core.paths import ensure_vazir_font as _ensure_vazir, reports_dir
 
 TOTAL_LABEL = "جمع کل"
 HEADER_GREEN = "16A34A"
@@ -80,29 +79,6 @@ def _parse_formatted(text):
         return int(str(text).replace(",", "").replace("٫", "").strip())
     except (TypeError, ValueError):
         return 0
-
-
-def _app_base_path():
-    """مسیر پایه برنامه (مثل کدهای موجود؛ سازگار با نسخه بسته‌بندی‌شده)."""
-    return os.path.dirname(os.path.abspath(sys.argv[0])) or os.getcwd()
-
-
-def _ensure_vazir():
-    """ثبت فونت وزیر برای PDF در صورت نبود."""
-    if "Vazir" in getRegisteredFontNames():
-        return
-    base = _app_base_path()
-    for candidate in (
-        os.path.join(base, "Vazir.ttf"),
-        os.path.join(base, "assets", "Vazir.ttf"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Vazir.ttf"),
-    ):
-        if os.path.exists(candidate):
-            try:
-                registerFont(TTFont("Vazir", candidate))
-            except Exception:
-                pass
-            return
 
 
 # ------------------------------------------------------------------ #
@@ -421,7 +397,7 @@ def _build_dataframes(spec, raw_data):
 
 def _report_paths(report_type, extension):
     spec = SPECS[report_type]
-    reports_folder = os.path.join(_app_base_path(), "reports")
+    reports_folder = reports_dir()
     os.makedirs(reports_folder, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{spec['file_prefix']}_{timestamp}.{extension}"
