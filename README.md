@@ -137,24 +137,64 @@ To log in to the application for the first time, use the following credentials:
 ## ساخت خروجی برای ویندوز / Building Executable for Windows
 
 **فارسی**  
-برای ساخت فایل اجرایی مستقل (EXE) در ویندوز، از PyInstaller استفاده کنید:
+برای ساخت فایل اجرایی مستقل (EXE) در ویندوز، از PyInstaller استفاده کنید.
 
-1. نصب PyInstaller (در کنار سایر کتابخانه‌ها):
-   ```bash
-   pip install pyinstaller
-   ```
+### ⭐ روش پیشنهادی — محیط مجازی تمیز (venv)
 
-2. **روش پیشنهادی — با فایل آماده spec** (همه تنظیمات از قبل انجام شده است):
-   ```bash
-   pyinstaller --noconfirm finance_app.spec
-   ```
+اگر در پایتون سراسری خود پکیج‌های زیادی نصب کرده‌اید (مثلاً PyQt5،
+torch، IPython و...)، حتماً در یک محیط مجازی تمیز بیلد بگیرید؛ هم از
+خطاهای تداخل جلوگیری می‌کند و هم حجم فایل exe را به‌شدت کم می‌کند:
 
-3. **روش جایگزین — دستور مستقیم**:
-   ```bash
-   pyinstaller --noconfirm --onefile --windowed --icon=assets/icon.ico --add-data "assets;assets" --exclude-module tkinter main.py
-   ```
+```bat
+cd /d E:\MyProject\Python_personal_accounting
 
-4. فایل اجرایی `FinanceApp.exe` در پوشه `dist` ساخته می‌شود.
+:: ۱) ساخت محیط مجازی تمیز
+python -m venv build-env
+
+:: ۲) فعال‌سازی آن
+build-env\Scripts\activate
+
+:: ۳) نصب فقط وابستگی‌های برنامه + PyInstaller
+pip install -r requirements.txt pyinstaller
+
+:: ۴) ساخت
+pyinstaller --noconfirm finance_app.spec
+
+:: ۵) (اختیاری) خارج شدن از محیط مجازی
+deactivate
+```
+
+### روش دوم — بیلد در پایتون سراسری
+
+فایل `finance_app.spec` لیست `excludes` کاملی دارد (PyQt5، PySide،
+torch، scipy، IPython و...) تا حتی در محیط شلوغ هم بیلد موفق و سبک
+باشد؛ اما روش venv بالا همیشه تمیزترین نتیجه را می‌دهد:
+
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm finance_app.spec
+```
+
+فایل اجرایی `FinanceApp.exe` در پوشه `dist` ساخته می‌شود.
+
+### 🔧 رفع خطاهای رایج بیلد
+
+**خطای «attempt to collect multiple Qt bindings packages»**  
+یعنی در پایتون شما هم PyQt5/PySide نصب است هم PyQt6؛ در حالی که
+برنامه فقط PyQt6 لازم دارد. دو راه‌حل:
+1. با روش venv بالا در محیط تمیز بیلد بگیرید (بهترین راه).
+2. یا از آخرین نسخه `finance_app.spec` استفاده کنید که PyQt5/PySide2/PySide6 را در `excludes` حذف کرده است.
+
+```text
+ERROR: Aborting build process due to attempt to collect multiple Qt
+bindings packages: attempting to run hook for 'PyQt5', while hook for
+'PyQt6' has already been run!
+```
+
+**حجم خیلی بزرگ فایل exe**  
+نشانه آن است که در محیط شلوغ بیلد گرفته‌اید و پکیج‌های اضافی
+(torch/scipy/numba و...) داخل بسته آمده‌اند. با روش venv بیلد بگیرید
+یا مطمئن شوید از آخرین نسخه `finance_app.spec` استفاده می‌کنید.
 
 **نکات مهم:**
 - کل پوشه `dist/FinanceApp` را (یا فقط فایل exe در حالت one-file) هر جا می‌خواهید کپی کنید؛ برنامه کاملاً مستقل است.
@@ -162,31 +202,70 @@ To log in to the application for the first time, use the following credentials:
 - اگر آنتی‌ویروس هشدار داد (هشدار رایج PyInstaller)، پوشه برنامه را در استثناهای آنتی‌ویروس قرار دهید.
 
 **English**  
-To build a standalone executable (EXE) for Windows, use PyInstaller:
+To build a standalone executable (EXE) for Windows, use PyInstaller.
 
-1. Install PyInstaller (alongside the other libraries):
-   ```bash
-   pip install pyinstaller
-   ```
+### ⭐ Recommended — clean virtual environment (venv)
 
-2. **Recommended — using the ready spec file** (all settings are preconfigured):
-   ```bash
-   pyinstaller --noconfirm finance_app.spec
-   ```
+If your global Python has many packages installed (e.g. PyQt5, torch,
+IPython...), always build inside a clean virtual environment. This avoids
+binding conflicts and greatly reduces the EXE size:
 
-3. **Alternative — direct command**:
-   ```bash
-   pyinstaller --noconfirm --onefile --windowed --icon=assets/icon.ico --add-data "assets;assets" --exclude-module tkinter main.py
-   ```
+```bat
+cd /d E:\MyProject\Python_personal_accounting
 
-4. The executable `FinanceApp.exe` is created in the `dist` folder.
+:: 1) Create a clean virtual environment
+python -m venv build-env
+
+:: 2) Activate it
+build-env\Scripts\activate
+
+:: 3) Install only the app dependencies + PyInstaller
+pip install -r requirements.txt pyinstaller
+
+:: 4) Build
+pyinstaller --noconfirm finance_app.spec
+
+:: 5) (Optional) Leave the virtual environment
+deactivate
+```
+
+### Alternative — building in the global Python
+
+`finance_app.spec` ships with a comprehensive `excludes` list (PyQt5,
+PySide, torch, scipy, IPython, ...) so the build succeeds and stays lean
+even in a crowded environment; but the venv method above always gives
+the cleanest result:
+
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm finance_app.spec
+```
+
+The executable `FinanceApp.exe` is created in the `dist` folder.
+
+### 🔧 Troubleshooting common build errors
+
+**Error: "attempt to collect multiple Qt bindings packages"**  
+This means both PyQt5/PySide and PyQt6 are installed in your Python,
+while the app only needs PyQt6. Two fixes:
+1. Build inside a clean venv (best practice — see above).
+2. Or use the latest `finance_app.spec`, which lists PyQt5/PySide2/PySide6 in `excludes`.
+
+```text
+ERROR: Aborting build process due to attempt to collect multiple Qt
+bindings packages: attempting to run hook for 'PyQt5', while hook for
+'PyQt6' has already been run!
+```
+
+**Very large EXE file**  
+This means extra packages (torch/scipy/numba/...) leaked into the bundle
+from a crowded environment. Build via the venv method, or make sure you
+are using the latest `finance_app.spec`.
 
 **Important notes:**
 - Copy the whole `dist/FinanceApp` folder (or just the exe in one-file mode) anywhere you like; it is fully self-contained.
 - The database file (`finance.db`) and the `reports` / `database-backup` folders are created automatically **next to the exe**; place the exe in a writable folder (not inside `Program Files`).
 - If your antivirus flags the file (a common PyInstaller false positive), add the program folder to your antivirus exclusions.
-
----
 
 ## لایسنس / License
 

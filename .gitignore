@@ -87,3 +87,4 @@ __pycache__/
 finance.db
 build/
 dist/*.spec.bak
+build-env/*
