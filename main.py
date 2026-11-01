@@ -36,6 +36,7 @@ from ui.components.custom_widgets import NumberInput, PersianCalendarPopup, Pers
 from core import utils
 from ui.tabs.dashboard_tab import DashboardTab
 from ui.tabs.accounts_tab import AccountsTab
+from ui.tabs.transactions_tab import TransactionsTab
 
 # تنظیم locale برای جداکننده اعداد
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
@@ -280,7 +281,9 @@ class FinanceApp(QMainWindow):
         # استفاده از کلاس جدید برای ساخت تب حساب‌ها و پاس دادن db_manager و self
         self.accounts_tab_widget = AccountsTab(self.db_manager, self)
         
-        transactions_tab = self.create_transactions_tab()
+        # ساخت تب تراکنش‌ها به صورت ماژول مستقل + اتصال سیگنال تغییر داده
+        self.transactions_tab = TransactionsTab(self.db_manager, self)
+        self.transactions_tab.data_changed.connect(self.on_transactions_data_changed)
         debts_tab = self.create_debts_tab()
         loans_tab = self.create_loans_tab()
         reports_tab = self.create_reports_tab()
@@ -290,7 +293,7 @@ class FinanceApp(QMainWindow):
 
         tabs.addTab(self.dashboard_tab, "داشبورد")
         tabs.addTab(self.accounts_tab_widget, "حساب‌ها") # افزودن تب مستقل
-        tabs.addTab(transactions_tab, "تراکنش‌ها")
+        tabs.addTab(self.transactions_tab, "تراکنش‌ها")
         tabs.addTab(debts_tab, "بدهی/طلب")
         tabs.addTab(loans_tab, "وام‌ها")
         tabs.addTab(reports_tab, "گزارش‌ها")
@@ -309,126 +312,15 @@ class FinanceApp(QMainWindow):
         if index == 0:  # تب داشبورد
             self.dashboard_tab.update_dashboard()
 
+    def on_transactions_data_changed(self):
+        """پس از هر تغییر در تراکنش‌ها: به‌روزرسانی موجودی حساب‌ها و داشبورد"""
+        self.load_accounts()
+        self.dashboard_tab.update_dashboard()
+
     def show_change_password_dialog(self, username):
         dialog = ChangePasswordDialog(self.db_manager, username, self)
         dialog.exec()
 
-   
-    # اصلاح متد create_transactions_tab
-    def create_transactions_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-
-        # فرم ثبت تراکنشcreate_debts_tab
-        transaction_form = QFormLayout()
-        self.transaction_account = QComboBox()
-        self.transaction_person = QComboBox()
-        self.transaction_person.addItem("-", None)
-        self.transaction_type = QComboBox()
-        self.transaction_type.addItems(["درآمد", "هزینه"])
-        self.transaction_category = QComboBox()
-        self.transaction_type.currentTextChanged.connect(self.update_categories)
-        self.load_categories()
-        self.transaction_amount = NumberInput()
-        self.transaction_date = QLineEdit()
-        today = datetime.now().date()
-        self.transaction_date.setText(utils.gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
-        self.transaction_date.setPlaceholderText("1404/02/13")
-        self.transaction_date.setReadOnly(True)
-        self.transaction_date.mousePressEvent = lambda a0: self.show_calendar_popup(self.transaction_date)
-        self.transaction_desc = QLineEdit()
-        add_transaction_btn = QPushButton("ثبت تراکنش")
-        add_transaction_btn.clicked.connect(self.add_transaction)
-        transaction_form.addRow("حساب:", self.transaction_account)
-        transaction_form.addRow("شخص:", self.transaction_person)
-        transaction_form.addRow("نوع:", self.transaction_type)
-        transaction_form.addRow("دسته‌بندی:", self.transaction_category)
-        transaction_form.addRow("مبلغ:", self.transaction_amount)
-        transaction_form.addRow("تاریخ (شمسی):", self.transaction_date)
-        transaction_form.addRow("توضیحات:", self.transaction_desc)
-        transaction_form.addRow(add_transaction_btn)
-        layout.addLayout(transaction_form)
-
-        # فرم انتقال پول بین حساب‌ها
-        transfer_form = QFormLayout()
-        transfer_label = QLabel("انتقال پول بین حساب‌ها")
-        transfer_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFF;")
-        self.transfer_from_account = QComboBox()
-        self.transfer_to_account = QComboBox()
-        self.transfer_amount = NumberInput()
-        self.transfer_date = QLineEdit()
-        self.transfer_date.setText(utils.gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
-        self.transfer_date.setPlaceholderText("1404/02/13")
-        self.transfer_date.setReadOnly(True)
-        self.transfer_date.mousePressEvent = lambda event: self.show_calendar_popup(self.transfer_date)
-        transfer_btn = QPushButton("انتقال")
-        transfer_btn.clicked.connect(self.transfer_money)
-        transfer_form.addRow(transfer_label)
-        transfer_form.addRow("از حساب:", self.transfer_from_account)
-        transfer_form.addRow("به حساب:", self.transfer_to_account)
-        transfer_form.addRow("مبلغ:", self.transfer_amount)
-        transfer_form.addRow("تاریخ (شمسی):", self.transfer_date)
-        transfer_form.addRow(transfer_btn)
-        layout.addLayout(transfer_form)
-
-        # فرم جستجو و گزارش‌گیری
-        search_form = QFormLayout()
-        search_label = QLabel("جستجو و گزارش‌گیری تراکنش‌ها")
-        search_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFF;")
-        self.transaction_search_type = QComboBox()
-        self.transaction_search_type.addItems(["همه", "برداشت", "واریز", "انتقال"])
-        self.transaction_search_person = QComboBox()
-        self.transaction_search_person.addItem("-", None)
-        self.load_persons_to_combobox(self.transaction_search_person)
-        self.transaction_search_amount = NumberInput()
-        self.transaction_search_start_date = QLineEdit()
-        self.transaction_search_start_date.setPlaceholderText("1404/02/13")
-        self.transaction_search_start_date.setReadOnly(True)
-        self.transaction_search_start_date.mousePressEvent = lambda event: self.show_calendar_popup(self.transaction_search_start_date)
-        self.transaction_search_end_date = QLineEdit()
-        self.transaction_search_end_date.setPlaceholderText("1404/02/13")
-        self.transaction_search_end_date.setReadOnly(True)
-        self.transaction_search_end_date.mousePressEvent = lambda event: self.show_calendar_popup(self.transaction_search_end_date)
-        search_btn = QPushButton("نمایش گزارش")
-        search_btn.clicked.connect(self.search_transactions)
-        search_form.addRow(search_label)
-        search_form.addRow("نوع تراکنش:", self.transaction_search_type)
-        search_form.addRow("شخص:", self.transaction_search_person)
-        search_form.addRow("مبلغ:", self.transaction_search_amount)
-        search_form.addRow("از تاریخ (شمسی):", self.transaction_search_start_date)
-        search_form.addRow("تا تاریخ (شمسی):", self.transaction_search_end_date)
-        search_form.addRow(search_btn)
-        layout.addLayout(search_form)
-
-        # جدول تراکنش‌ها با اسکرول
-        scroll_area = QScrollArea()
-        self.transactions_table = QTableWidget()
-        self.transactions_table.setColumnCount(10)
-        self.transactions_table.setHorizontalHeaderLabels(["شناسه", "تاریخ", "حساب", "شخص", "دسته‌بندی", "مبلغ", "توضیحات", "نوع", "ویرایش", "حذف"])
-        self.transactions_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.transactions_table.verticalHeader().setDefaultSectionSize(40)
-        scroll_area.setWidget(self.transactions_table)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(400)
-        layout.addWidget(scroll_area)
-
-        # صفحه‌بندی
-        self.transactions_current_page = 1
-        self.transactions_per_page = 50
-        pagination_layout = QHBoxLayout()
-        self.transactions_prev_btn = QPushButton("صفحه قبلی")
-        self.transactions_next_btn = QPushButton("صفحه بعدی")
-        self.transactions_page_label = QLabel("صفحه 1")
-        self.transactions_prev_btn.clicked.connect(self.prev_transactions_page)
-        self.transactions_next_btn.clicked.connect(self.next_transactions_page)
-        pagination_layout.addWidget(self.transactions_prev_btn)
-        pagination_layout.addWidget(self.transactions_page_label)
-        pagination_layout.addWidget(self.transactions_next_btn)
-        layout.addLayout(pagination_layout)
-
-        tab.setLayout(layout)
-        return tab
-    
     def show_calendar_popup(self, date_edit):
         popup = PersianCalendarPopup(date_edit, self)
         popup.exec()
@@ -454,127 +346,6 @@ class FinanceApp(QMainWindow):
                 combobox.addItem(name, id)
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def search_transactions(self):
-        try:
-            trans_type = self.transaction_search_type.currentText()
-            person_id = self.transaction_search_person.currentData()
-            amount = self.transaction_search_amount.get_raw_value()
-            start_date = self.transaction_search_start_date.text()
-            end_date = self.transaction_search_end_date.text()
-
-            if not start_date or not end_date:
-                QMessageBox.warning(self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
-                return
-            if not utils.is_valid_shamsi_date(start_date) or not utils.is_valid_shamsi_date(end_date):
-                QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
-                return
-
-            start_date_g = utils.shamsi_to_gregorian(start_date)
-            end_date_g = utils.shamsi_to_gregorian(end_date)
-            if not start_date_g or not end_date_g:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                return
-
-            query = """
-                SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type
-                FROM transactions t
-                JOIN accounts a ON t.account_id = a.id
-                LEFT JOIN persons p ON t.person_id = p.id
-                JOIN categories c ON t.category_id = c.id
-                WHERE t.date BETWEEN ? AND ?
-            """
-            params = [start_date_g, end_date_g]
-
-            if trans_type == "برداشت":
-                query += " AND c.type = 'expense' AND c.name != 'انتقال بین حساب‌ها (خروج)'"
-            elif trans_type == "واریز":
-                query += " AND c.type = 'income' AND c.name != 'انتقال بین حساب‌ها (ورود)'"
-            elif trans_type == "انتقال":
-                query += " AND c.name IN ('انتقال بین حساب‌ها (ورود)', 'انتقال بین حساب‌ها (خروج)')"
-
-            if person_id:
-                query += " AND t.person_id = ?"
-                params.append(person_id)
-            if amount:
-                query += " AND t.amount = ?"
-                params.append(amount)
-
-            self.db_manager.execute(query, params)
-            results = self.db_manager.fetchall()
-            self.show_transaction_report(results)
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def show_transaction_report(self, results):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("گزارش تراکنش‌ها")
-        layout = QVBoxLayout()
-        dialog.setLayout(layout)
-
-        table = QTableWidget()
-        table.setColumnCount(8)
-        table.setHorizontalHeaderLabels(["شناسه", "تاریخ", "حساب", "شخص", "دسته‌بندی", "مبلغ", "توضیحات", "نوع"])
-        table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        table.verticalHeader().setDefaultSectionSize(40)
-
-        self.transaction_report_current_page = 1
-        self.transaction_report_per_page = 50
-        self.transaction_report_results = results
-        self.transaction_report_total_pages = (len(results) + self.transaction_report_per_page - 1) // self.transaction_report_per_page
-
-        self.update_transaction_report_table(table)
-
-        scroll_area = QScrollArea()
-        scroll_area.setWidget(table)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(400)
-        layout.addWidget(scroll_area)
-
-        pagination_layout = QHBoxLayout()
-        prev_btn = QPushButton("صفحه قبلی")
-        next_btn = QPushButton("صفحه بعدی")
-        page_label = QLabel(f"صفحه {self.transaction_report_current_page} از {self.transaction_report_total_pages}")
-        prev_btn.clicked.connect(lambda: self.prev_transaction_report_page(table, page_label))
-        next_btn.clicked.connect(lambda: self.next_transaction_report_page(table, page_label))
-        pagination_layout.addWidget(prev_btn)
-        pagination_layout.addWidget(page_label)
-        pagination_layout.addWidget(next_btn)
-        layout.addLayout(pagination_layout)
-
-        export_btn = QPushButton("خروجی (اکسل/CSV/PDF)")
-        export_btn.clicked.connect(lambda: self.export_report(results, "transactions"))
-        layout.addWidget(export_btn)
-
-        dialog.resize(800, 600)
-        dialog.exec()
-
-    def update_transaction_report_table(self, table):
-        start = (self.transaction_report_current_page - 1) * self.transaction_report_per_page
-        end = start + self.transaction_report_per_page
-        page_results = self.transaction_report_results[start:end]
-        table.setRowCount(len(page_results))
-        for row, (id, date, account, person, category, amount, desc, cat_type) in enumerate(page_results):
-            table.setItem(row, 0, QTableWidgetItem(str(id)))
-            table.setItem(row, 1, QTableWidgetItem(utils.gregorian_to_shamsi(date)))
-            table.setItem(row, 2, QTableWidgetItem(account))
-            table.setItem(row, 3, QTableWidgetItem(person or "-"))
-            table.setItem(row, 4, QTableWidgetItem(category))
-            table.setItem(row, 5, QTableWidgetItem(utils.format_number(amount)))
-            table.setItem(row, 6, QTableWidgetItem(desc or "-"))
-            table.setItem(row, 7, QTableWidgetItem("درآمد" if cat_type == "income" else "هزینه"))
-
-    def prev_transaction_report_page(self, table, page_label):
-        if self.transaction_report_current_page > 1:
-            self.transaction_report_current_page -= 1
-            self.update_transaction_report_table(table)
-            page_label.setText(f"صفحه {self.transaction_report_current_page} از {self.transaction_report_total_pages}")
-
-    def next_transaction_report_page(self, table, page_label):
-        if self.transaction_report_current_page < self.transaction_report_total_pages:
-            self.transaction_report_current_page += 1
-            self.update_transaction_report_table(table)
-            page_label.setText(f"صفحه {self.transaction_report_current_page} از {self.transaction_report_total_pages}")
 
     # اصلاح متد create_debts_tab
     def create_debts_tab(self):
@@ -2255,19 +2026,16 @@ class FinanceApp(QMainWindow):
             accounts = self.db_manager.fetchall()
             
             # پاک کردن کامبوباکس‌های مرتبط با حساب در سایر تب‌ها
-            self.transaction_account.clear()
             self.debt_account.clear()
             self.loan_account.clear()
-            self.transfer_from_account.clear()
-            self.transfer_to_account.clear()
             
             for id, name, balance in accounts:
                 display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
-                self.transaction_account.addItem(display_text, id)
                 self.debt_account.addItem(display_text, id)
                 self.loan_account.addItem(display_text, id)
-                self.transfer_from_account.addItem(display_text, id)
-                self.transfer_to_account.addItem(display_text, id)
+            
+            # به‌روزرسانی کامبوباکس‌های تب تراکنش‌ها (فرم ثبت، انتقال و فیلتر لیست)
+            self.transactions_tab.reload_accounts(accounts)
                 
             # آپدیت کردن جدول داخل فایل جداگانه حساب‌ها
             if hasattr(self, 'accounts_tab_widget'):
@@ -2276,21 +2044,9 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده در بارگذاری حساب‌ها: {e}")
 
-    def update_categories(self):
-        """به‌روزرسانی لیست دسته‌بندی‌ها بر اساس نوع تراکنش"""
-        category_type = "income" if self.transaction_type.currentText() == "درآمد" else "expense"
-        self.transaction_category.clear()
-        try:
-            self.db_manager.execute("SELECT id, name FROM categories WHERE type = ?", (category_type,))
-            categories = self.db_manager.fetchall()
-            for cat_id, name in categories:
-                self.transaction_category.addItem(name, cat_id)
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
     def load_categories(self):
-        """بارگذاری اولیه دسته‌بندی‌ها"""
-        self.update_categories()  # به جای کد قبلی، از متد جدید استفاده می‌کنیم
+        """بارگذاری دسته‌بندی‌های فرم تراکنش (واگذاری به تب تراکنش‌ها)"""
+        self.transactions_tab.reload_categories()
 
     def load_categories_table(self):
         # This method is now simplified to call the main filtering method,
@@ -2367,55 +2123,6 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def add_transaction(self):
-        account_id = self.transaction_account.currentData()
-        person_id = self.transaction_person.currentData()
-        if person_id is None or person_id == "":
-            person_id = None  # صریح مشخص کنیم
-        category_id = self.transaction_category.currentData()
-        amount = self.transaction_amount.get_raw_value()
-        shamsi_date = self.transaction_date.text()
-        desc = self.transaction_desc.text()
-        category_type = "income" if self.transaction_type.currentText() == "درآمد" else "expense"
-
-        if not amount:
-            QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
-            return
-        if not shamsi_date:
-            shamsi_date = utils.gregorian_to_shamsi(datetime.now().date().strftime("%Y-%m-%d"))
-        if not utils.is_valid_shamsi_date(shamsi_date):
-            QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
-            return
-        try:
-            date = utils.shamsi_to_gregorian(shamsi_date)
-            if not date:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                return
-            QDate.fromString(date, "yyyy-MM-dd")
-        except ValueError:
-            QMessageBox.warning(self, "خطا", "تاریخ نامعتبر است!")
-            return
-        try:
-            self.db_manager.execute(
-                "INSERT INTO transactions (account_id, person_id, category_id, amount, date, description) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (account_id, person_id, category_id, amount, date, desc)
-            )
-            if category_type == "income":
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
-            else:
-                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
-            self.db_manager.commit()
-            self.transaction_amount.clear()
-            self.transaction_date.clear()
-            self.transaction_desc.clear()
-            self.load_transactions()
-            self.load_accounts()
-            self.dashboard_tab.update_dashboard()
-            QMessageBox.information(self, "موفق", "تراکنش با موفقیت ثبت شد!")
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
     def delete_category(self, category_id):
         try:
             # بررسی استفاده از دسته‌بندی در تراکنش‌ها
@@ -2441,335 +2148,9 @@ class FinanceApp(QMainWindow):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
-    def edit_transaction(self, transaction_id):
-        try:
-            self.db_manager.execute(
-                "SELECT t.account_id, t.person_id, t.category_id, t.amount, t.date, t.description, c.type "
-                "FROM transactions t JOIN categories c ON t.category_id = c.id WHERE t.id = ?",
-                (transaction_id,)
-            )
-            transaction = self.db_manager.fetchone()
-            if not transaction:
-                QMessageBox.warning(self, "خطا", "تراکنش یافت نشد!")
-                return
-            account_id, person_id, category_id, amount, date, desc, category_type = transaction
-
-            dialog = QDialog(self)
-            dialog.setWindowTitle("ویرایش تراکنش")
-            layout = QFormLayout()
-            dialog.setLayout(layout)
-
-            edit_account = QComboBox()
-            self.db_manager.execute("SELECT id, name, balance FROM accounts")
-            accounts = self.db_manager.fetchall()
-            for acc_id, name, balance in accounts:
-                display_text = f"{name} (موجودی: {utils.format_number(balance)} ریال)"
-                edit_account.addItem(display_text, acc_id)
-            edit_account.setCurrentText([f"{name} (موجودی: {utils.format_number(balance)} ریال)" for acc_id, name, balance in accounts if acc_id == account_id][0])
-
-            edit_person = QComboBox()
-            edit_person.addItem("-", None)
-            self.db_manager.execute("SELECT id, name FROM persons")
-            persons = self.db_manager.fetchall()
-            for p_id, name in persons:
-                edit_person.addItem(name, p_id)
-            if person_id:
-                edit_person.setCurrentText([name for p_id, name in persons if p_id == person_id][0])
-
-            edit_type = QComboBox()
-            edit_type.addItems(["درآمد", "هزینه"])
-            edit_type.setCurrentText("درآمد" if category_type == "income" else "هزینه")
-
-            edit_category = QComboBox()
-            def update_categories():
-                edit_category.clear()
-                current_type = "income" if edit_type.currentText() == "درآمد" else "expense"
-                self.db_manager.execute("SELECT id, name FROM categories WHERE type = ?", (current_type,))
-                categories = self.db_manager.fetchall()
-                for cat_id, name in categories:
-                    edit_category.addItem(name, cat_id)
-                if category_id:
-                    for index in range(edit_category.count()):
-                        if edit_category.itemData(index) == category_id:
-                            edit_category.setCurrentIndex(index)
-                            break
-            update_categories()
-            edit_type.currentTextChanged.connect(update_categories)
-
-            edit_amount = NumberInput()
-            edit_amount.setText(str(amount))
-            edit_date = QLineEdit(utils.gregorian_to_shamsi(date))
-            edit_date.setReadOnly(True)
-            edit_date.setPlaceholderText("1404/02/13")
-            edit_date.mousePressEvent = lambda event: self.show_calendar_popup(edit_date)
-            edit_desc = QLineEdit(desc)
-
-            save_btn = QPushButton("ذخیره")
-            save_btn.clicked.connect(lambda: self.save_transaction(
-                transaction_id, edit_account.currentData(), edit_person.currentData(),
-                edit_category.currentData(), edit_amount.get_raw_value(), edit_date.text(),
-                edit_desc.text(), edit_type.currentText(), dialog, account_id, amount, category_type
-            ))
-
-            layout.addRow("حساب:", edit_account)
-            layout.addRow("شخص:", edit_person)
-            layout.addRow("نوع:", edit_type)
-            layout.addRow("دسته‌بندی:", edit_category)
-            layout.addRow("مبلغ:", edit_amount)
-            layout.addRow("تاریخ (شمسی):", edit_date)
-            layout.addRow("توضیحات:", edit_desc)
-            layout.addRow(save_btn)
-
-            dialog.exec()
-
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def save_transaction(self, transaction_id, account_id, person_id, category_id, amount, shamsi_date, desc, type_text, dialog, old_account_id, old_amount, old_category_type):
-        if not amount or not shamsi_date:
-            QMessageBox.warning(self, "خطا", "مبلغ و تاریخ نمی‌توانند خالی باشند!")
-            return
-        if not utils.is_valid_shamsi_date(shamsi_date):
-            QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
-            return
-        try:
-            amount = float(amount)
-            date = utils.shamsi_to_gregorian(shamsi_date)
-            if not date:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                return
-            QDate.fromString(date, "yyyy-MM-dd")
-        except ValueError:
-            QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
-            return
-        try:
-            new_category_type = "income" if type_text == "درآمد" else "expense"
-
-            # خنثی کردن اثر تراکنش قدیمی
-            if old_category_type == "income":
-                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (old_amount, old_account_id))
-            else:
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (old_amount, old_account_id))
-
-            # اعمال اثر تراکنش جدید
-            if new_category_type == "income":
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
-            else:
-                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
-
-            # بروزرسانی در دیتابیس
-            self.db_manager.execute(
-                "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, amount = ?, date = ?, description = ? WHERE id = ?",
-                (account_id, person_id, category_id, amount, date, desc, transaction_id)
-            )
-
-            self.db_manager.commit()
-            self.load_transactions()
-            self.load_accounts()
-            self.dashboard_tab.update_dashboard()
-            dialog.accept()
-            QMessageBox.information(self, "موفق", "تراکنش با موفقیت ویرایش شد!")
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def transfer_money(self):
-        from_account_id = self.transfer_from_account.currentData()
-        to_account_id = self.transfer_to_account.currentData()
-        amount = self.transfer_amount.get_raw_value()
-        shamsi_date = self.transfer_date.text()
-
-        # بررسی ورودی‌ها
-        if not amount or not shamsi_date:
-            QMessageBox.warning(self, "خطا", "مبلغ و تاریخ نمی‌توانند خالی باشند!")
-            return
-        if not utils.is_valid_shamsi_date(shamsi_date):
-            QMessageBox.warning(self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
-            return
-        if from_account_id == to_account_id:
-            QMessageBox.warning(self, "خطا", "حساب مبدأ و مقصد نمی‌توانند یکسان باشند!")
-            return
-
-        try:
-            # تبدیل تاریخ شمسی به میلادی
-            date = utils.shamsi_to_gregorian(shamsi_date)
-            if not date:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
-                return
-            QDate.fromString(date, "yyyy-MM-dd")
-
-            # بررسی موجودی حساب مبدأ
-            self.db_manager.execute("SELECT balance FROM accounts WHERE id = ?", (from_account_id,))
-            balance = self.db_manager.fetchone()
-            if not balance or balance[0] < amount:
-                QMessageBox.warning(self, "خطا", "موجودی حساب مبدأ کافی نیست!")
-                return
-
-            # پیدا کردن دسته‌بندی‌های انتقال
-            self.db_manager.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (خروج)' AND type = 'expense'")
-            expense_category_id = self.db_manager.fetchone()
-            if not expense_category_id:
-                QMessageBox.critical(self, "خطا", "دسته‌بندی 'انتقال بین حساب‌ها (خروج)' یافت نشد!")
-                return
-            expense_category_id = expense_category_id[0]
-
-            self.db_manager.execute("SELECT id FROM categories WHERE name = 'انتقال بین حساب‌ها (ورود)' AND type = 'income'")
-            income_category_id = self.db_manager.fetchone()
-            if not income_category_id:
-                QMessageBox.critical(self, "خطا", "دسته‌بندی 'انتقال بین حساب‌ها (ورود)' یافت نشد!")
-                return
-            income_category_id = income_category_id[0]
-
-            # ثبت تراکنش خروج
-            self.db_manager.execute(
-                "INSERT INTO transactions (account_id, category_id, amount, date, description) VALUES (?, ?, ?, ?, ?)",
-                (from_account_id, expense_category_id, amount, date, "انتقال به حساب دیگر")
-            )
-
-            # ثبت تراکنش ورود
-            self.db_manager.execute(
-                "INSERT INTO transactions (account_id, category_id, amount, date, description) VALUES (?, ?, ?, ?, ?)",
-                (to_account_id, income_category_id, amount, date, "دریافت از حساب دیگر")
-            )
-
-            # به‌روزرسانی موجودی حساب‌ها
-            self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, from_account_id))
-            self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, to_account_id))
-
-            # کامیت تراکنش
-            self.db_manager.commit()
-
-            # پاک کردن فرم و به‌روزرسانی UI
-            self.transfer_amount.clear()
-            self.transfer_date.clear()
-            self.load_transactions()
-            self.load_accounts()
-            self.dashboard_tab.update_dashboard()
-            QMessageBox.information(self, "موفق", "انتقال با موفقیت انجام شد!")
-
-        except sqlite3.Error as e:
-            # رول‌بک در صورت خطا
-            self.db_manager.rollback()
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
     def load_transactions(self):
-        try:
-            # ۱. محاسبه تعداد کل صفحات فقط برای تب تراکنش‌ها
-            self.db_manager.execute("SELECT COUNT(*) FROM transactions")
-            total_transactions = self.db_manager.fetchone()[0]
-            self.transactions_total_pages = (total_transactions + self.transactions_per_page - 1) // self.transactions_per_page
-            
-            if self.transactions_total_pages == 0:
-                self.transactions_total_pages = 1
-
-            # ۲. واکشی اطلاعات تب تراکنش‌ها برای صفحه فعلی
-            offset = (self.transactions_current_page - 1) * self.transactions_per_page
-            self.db_manager.execute(
-                "SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type "
-                "FROM transactions t "
-                "JOIN accounts a ON t.account_id = a.id "
-                "LEFT JOIN persons p ON t.person_id = p.id "
-                "JOIN categories c ON t.category_id = c.id "
-                "ORDER BY t.date DESC LIMIT ? OFFSET ?",
-                (self.transactions_per_page, offset)
-            )
-            transactions = self.db_manager.fetchall()
-
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-            return
-
-        # ۳. به‌روزرسانی جدول تب تراکنش‌ها
-        self.transactions_table.setRowCount(min(len(transactions), self.transactions_per_page))
-        
-        # تنظیم عرض ستون‌ها
-        self.transactions_table.setColumnWidth(0, 50)
-        self.transactions_table.setColumnWidth(1, 100)
-        self.transactions_table.setColumnWidth(2, 150)
-        self.transactions_table.setColumnWidth(3, 100)
-        self.transactions_table.setColumnWidth(4, 120)
-        self.transactions_table.setColumnWidth(5, 100)
-        self.transactions_table.setColumnWidth(6, 200)
-        self.transactions_table.setColumnWidth(7, 80)
-        self.transactions_table.setColumnWidth(8, 80)
-        self.transactions_table.setColumnWidth(9, 80)  # ستون دکمه حذف
-
-        for row, (id, date, account, person, category, amount, desc, category_type) in enumerate(transactions):
-            shamsi_date = utils.gregorian_to_shamsi(date) if date else "-"
-            self.transactions_table.setItem(row, 0, QTableWidgetItem(str(id)))
-            self.transactions_table.setItem(row, 1, QTableWidgetItem(shamsi_date))
-            self.transactions_table.setItem(row, 2, QTableWidgetItem(account or "-"))
-            self.transactions_table.setItem(row, 3, QTableWidgetItem(person or "-"))
-            self.transactions_table.setItem(row, 4, QTableWidgetItem(category or "-"))
-            self.transactions_table.setItem(row, 5, QTableWidgetItem(utils.format_number(amount)))
-            self.transactions_table.setItem(row, 6, QTableWidgetItem(desc or ""))
-            self.transactions_table.setItem(row, 7, QTableWidgetItem("درآمد" if category_type == "income" else "هزینه"))
-            
-            # ایجاد دکمه ویرایش
-            edit_btn = QPushButton("ویرایش")
-            edit_btn.clicked.connect(lambda checked, t_id=id: self.edit_transaction(t_id))
-            self.transactions_table.setCellWidget(row, 8, edit_btn)
-            
-            # ایجاد دکمه حذف
-            delete_btn = QPushButton("حذف")
-            delete_btn.clicked.connect(lambda checked, t_id=id: self.delete_transaction(t_id))
-            self.transactions_table.setCellWidget(row, 9, delete_btn)
-
-        # ۴. به‌روزرسانی وضعیت دکمه‌های صفحه‌بندی
-        self.transactions_page_label.setText(f"صفحه {self.transactions_current_page} از {self.transactions_total_pages}")
-        self.transactions_prev_btn.setEnabled(self.transactions_current_page > 1)
-        self.transactions_next_btn.setEnabled(self.transactions_current_page < self.transactions_total_pages)
-    
-    def delete_transaction(self, transaction_id):
-        # دریافت اطلاعات تراکنش برای معکوس کردن اثر آن
-        try:
-            self.db_manager.execute(
-                "SELECT t.account_id, t.amount, c.type "
-                "FROM transactions t JOIN categories c ON t.category_id = c.id WHERE t.id = ?",
-                (transaction_id,)
-            )
-            transaction = self.db_manager.fetchone()
-            if not transaction:
-                QMessageBox.warning(self, "خطا", "تراکنش یافت نشد!")
-                return
-            account_id, amount, category_type = transaction
-
-            # تأیید حذف از کاربر
-            reply = QMessageBox.question(
-                self, "تأیید حذف", "آیا مطمئن هستید که می‌خواهید این تراکنش را حذف کنید؟",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-
-            # معکوس کردن اثر تراکنش روی موجودی حساب
-            if category_type == "income":
-                # اگر تراکنش درآمد بوده، مبلغ رو از حساب کم می‌کنیم
-                self.db_manager.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount, account_id))
-            else:
-                # اگر تراکنش هزینه بوده، مبلغ رو به حساب برمی‌گردونیم
-                self.db_manager.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, account_id))
-
-            # حذف تراکنش از دیتابیس
-            self.db_manager.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
-            self.db_manager.commit()
-
-            # به‌روزرسانی جداول و داشبورد
-            self.load_transactions()
-            self.load_accounts()
-            self.dashboard_tab.update_dashboard()
-            QMessageBox.information(self, "موفق", "تراکنش با موفقیت حذف شد!")
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
-
-    def prev_transactions_page(self):
-        if self.transactions_current_page > 1:
-            self.transactions_current_page -= 1
-            self.load_transactions()
-
-    def next_transactions_page(self):
-        if self.transactions_current_page < self.transactions_total_pages:
-            self.transactions_current_page += 1
-            self.load_transactions()
+        """به‌روزرسانی لیست تراکنش‌ها (واگذاری به تب تراکنش‌ها)"""
+        self.transactions_tab.refresh()
 
     def add_debt(self):
         person_id = self.debt_person.currentData()
@@ -4137,17 +3518,17 @@ class FinanceApp(QMainWindow):
         try:
             self.filter_persons_table() # ابتدا جدول را فیلتر و پر می‌کنیم
 
-            # به‌روزرسانی کامبوباکس‌ها (برای تراکنش‌ها و بدهی‌ها)
-            self.transaction_person.clear()
+            # به‌روزرسانی کامبوباکس بدهی‌ها
             self.debt_person.clear()
-            self.transaction_person.addItem("-", None)
             self.debt_person.addItem("-", None)
 
             self.db_manager.execute("SELECT id, name FROM persons ORDER BY name ASC")
             all_persons = self.db_manager.fetchall()
             for id, name in all_persons:
-                self.transaction_person.addItem(name, id)
                 self.debt_person.addItem(name, id)
+
+            # به‌روزرسانی کامبوباکس‌های تب تراکنش‌ها (فرم ثبت و جستجو)
+            self.transactions_tab.reload_persons(all_persons)
 
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
