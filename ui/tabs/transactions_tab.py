@@ -1053,9 +1053,14 @@ class TransactionsTab(QWidget):
             dialog = QDialog(self)
             dialog.setWindowTitle("ویرایش تراکنش")
             dialog.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            # نکته: رنگ لیبل‌ها باید صریح باشد؛ در ویندوز با تم تاریک، پالت
+            # سیستم متن لیبل‌های بی‌رنگ را سفید می‌کند و روی پس‌زمینه روشنِ
+            # این دیالوگ نامرئی می‌شوند.
             dialog.setStyleSheet(f"""
                 QDialog {{ background-color: {PAGE_BG};
                           font-family: 'Vazir', 'Arial'; }}
+                QLabel {{ color: {TEXT_DARK}; font-size: 13px; font-weight: bold; }}
+                QCheckBox {{ color: {TEXT_DARK}; font-size: 13px; }}
             """)
             layout = QFormLayout(dialog)
             layout.setContentsMargins(18, 18, 18, 18)
