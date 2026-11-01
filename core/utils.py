@@ -57,3 +57,16 @@ def format_number(number):
         return locale.format_string("%d", int(number), grouping=True)
     except (ValueError, TypeError):
         return str(number)
+
+
+def format_amount(value):
+    """فرمت‌بندی مبالغ با جداکننده هزارگان، مستقل از locale سیستم.
+
+    برخلاف format_number که به locale سیستم وابسته است و در برخی
+    محیط‌ها (مثل ویندوز با لوکیل فارسی) جداکننده اعمال نمی‌شود،
+    این تابع همیشه خروجی قابل‌خواندن مثل «14,000,000» تولید می‌کند.
+    """
+    try:
+        return f"{int(value):,}"
+    except (ValueError, TypeError):
+        return str(value) if value is not None else "0"

@@ -38,20 +38,8 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QGraphicsDropShadowEffect,
 )
 
-from core.utils import gregorian_to_shamsi
+from core.utils import format_amount, gregorian_to_shamsi
 
-
-def _format_amount(value):
-    """فرمت‌بندی مبلغ با جداکننده هزارگان (مستقل از locale سیستم).
-
-    تابع format_number به locale سیستم وابسته است و در برخی محیط‌ها
-    (مثل ویندوز با لوکیل فارسی) جداکننده اعمال نمی‌شود؛ این نسخه
-    همیشه خروجی قابل‌خواندن مثل «14,000,000» تولید می‌کند.
-    """
-    try:
-        return f"{int(value):,}"
-    except (ValueError, TypeError):
-        return str(value) if value is not None else "0"
 
 # ----------------------------------------------------------------------------
 # پالت رنگی داشبورد (هماهنگ با تم سبز برنامه)
@@ -587,7 +575,7 @@ class DashboardTab(QWidget):
         # موجودی کل
         self.db_manager.execute("SELECT SUM(balance) FROM accounts")
         total_balance = self.db_manager.fetchone()[0] or 0
-        self.total_balance_label.setText(f"{_format_amount(total_balance)} ریال")
+        self.total_balance_label.setText(f"{format_amount(total_balance)} ریال")
 
         # تاریخ امروز (شمسی)
         self.header_date_label.setText(f"امروز: {self._today_text()}")
@@ -597,17 +585,17 @@ class DashboardTab(QWidget):
         income = self.get_current_month_income()
         balance = income - expenses
 
-        self.kpi_expenses.setText(f"{_format_amount(expenses)} ریال")
-        self.kpi_income.setText(f"{_format_amount(income)} ریال")
-        self.kpi_balance.setText(f"{_format_amount(balance)} ریال")
+        self.kpi_expenses.setText(f"{format_amount(expenses)} ریال")
+        self.kpi_income.setText(f"{format_amount(income)} ریال")
+        self.kpi_balance.setText(f"{format_amount(balance)} ریال")
         # رنگ تراز: سبز اگر مثبت، قرمز اگر منفی
         balance_color = GREEN if balance >= 0 else RED
         self.kpi_balance.setStyleSheet(
             f"font-size: 15px; font-weight: bold; color: {balance_color};")
         self.kpi_credits.setText(
-            f"{_format_amount(self.get_current_month_credits())} ریال")
+            f"{format_amount(self.get_current_month_credits())} ریال")
         self.kpi_debts.setText(
-            f"{_format_amount(self.get_current_month_debts())} ریال")
+            f"{format_amount(self.get_current_month_debts())} ریال")
 
     def _today_text(self):
         """تاریخ امروز به شمسی همراه با نام روز و ماه."""
@@ -689,11 +677,11 @@ class DashboardTab(QWidget):
             type_item.setForeground(type_color)
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            amount_item = QTableWidgetItem(_format_amount(amount))
+            amount_item = QTableWidgetItem(format_amount(amount))
             amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             amount_item.setForeground(type_color)
 
-            remaining_item = QTableWidgetItem(_format_amount(remaining))
+            remaining_item = QTableWidgetItem(format_amount(remaining))
             remaining_font = remaining_item.font()
             remaining_font.setBold(True)
             remaining_item.setFont(remaining_font)
@@ -715,9 +703,9 @@ class DashboardTab(QWidget):
         # به‌روزرسانی چیپ‌های خلاصه
         self.debts_count_chip.setText(f"{len(debts)} مورد")
         self.debts_sum_chip.setText(
-            f"جمع بدهی: {_format_amount(total_debt_remaining)} ریال")
+            f"جمع بدهی: {format_amount(total_debt_remaining)} ریال")
         self.credits_sum_chip.setText(
-            f"جمع طلب: {_format_amount(total_credit_remaining)} ریال")
+            f"جمع طلب: {format_amount(total_credit_remaining)} ریال")
 
     def _days_until(self, due_date, today_g):
         """تعداد روز باقی‌مانده تا سررسید (میلادی برای محاسبه، نمایش شمسی)."""
@@ -802,7 +790,7 @@ class DashboardTab(QWidget):
                     category_item = QTableWidgetItem(category or "-")
                     category_item.setForeground(QColor(TEXT_MUTED))
 
-                    amount_item = QTableWidgetItem(_format_amount(amount))
+                    amount_item = QTableWidgetItem(format_amount(amount))
                     amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     amount_font = amount_item.font()
                     amount_font.setBold(True)
