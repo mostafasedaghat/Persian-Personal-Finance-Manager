@@ -46,3 +46,30 @@ PersianCalendarWidget QPushButton {
 PersianCalendarWidget QPushButton:hover {
     background-color: #555;
 }
+
+/* ------------------------------------------------------------------
+   جعبه‌پیام‌ها (QMessageBox)
+   نکته مهم: در ویندوز با «تم تاریک»، جعبه‌پیام از پالت سیستم
+   رنگ می‌گیرد؛ متن تیره روی پس‌زمینه تیره نامرئی می‌شد.
+   با تعیین صریح پس‌زمینه روشن و رنگ متن تیره، پیام‌ها همیشه
+   خوانا می‌مانند — مستقل از تم سیستم‌عامل.
+   (هم‌راستا با اصلاح قبلی دیالوگ ویرایش تراکنش)
+------------------------------------------------------------------ */
+QMessageBox {
+    background-color: #ffffff;
+    font-family: Vazir, Arial;
+}
+
+QMessageBox QLabel {
+    background-color: transparent;
+    color: #1e293b;
+    font-size: 13px;
+    min-width: 260px;
+}
+
+QMessageBox QPushButton {
+    min-width: 88px;
+    padding: 7px 18px;
+    font-family: Vazir, Arial;
+    font-weight: bold;
+}

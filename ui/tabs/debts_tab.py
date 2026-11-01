@@ -2016,7 +2016,20 @@ class DebtsTab(QWidget):
         """گرفتن خروجی از نتایج جستجو از طریق پنجره اصلی."""
         if self.parent_window is not None and \
                 hasattr(self.parent_window, 'export_report'):
-            self.parent_window.export_report(results, "debts")
+            self.parent_window.export_report(
+                results, "debts", self._search_date_range_text())
+
+    def _search_date_range_text(self):
+        """متن بازه تاریخ جستجو برای درج در سربرگ خروجی‌ها."""
+        start = self.debt_search_start_date.text().strip()
+        end = self.debt_search_end_date.text().strip()
+        if start and end:
+            return f"از {start} تا {end}"
+        if start:
+            return f"از {start} به بعد"
+        if end:
+            return f"تا {end}"
+        return "همه تاریخ‌ها"
 
     def update_debt_report_table(self, table):
         start = (self.debt_report_current_page - 1) * self.debt_report_per_page
@@ -2075,6 +2088,41 @@ class DebtsTab(QWidget):
                     id_item, person_item, amount_item, paid_item, due_item,
                     status_item, account_item, type_item, desc_item]):
                 table.setItem(row, column, item)
+
+        # ---- ردیف «جمع کل» در انتهای صفحه آخر ----
+        if page_results and end >= len(self.debt_report_results):
+            self._append_report_totals_row(table)
+
+    def _append_report_totals_row(self, table):
+        """افزودن ردیف جمع کل (مبلغ/پرداخت‌شده/باقی‌مانده) به جدول گزارش."""
+        results = self.debt_report_results
+        total_amount = sum((r[2] or 0) for r in results)
+        total_paid = sum((r[3] or 0) for r in results)
+        remaining = total_amount - total_paid
+
+        row = table.rowCount()
+        table.insertRow(row)
+
+        cells = [
+            "", "جمع کل",
+            format_amount(total_amount),
+            format_amount(total_paid),
+            "",
+            f"{len(results)} مورد",
+            "", "",
+            f"باقی‌مانده: {format_amount(remaining)}",
+        ]
+        for col, text in enumerate(cells):
+            item = QTableWidgetItem(text)
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+            item.setBackground(QColor(SOFT_SLATE))
+            item.setForeground(QColor(TEXT_DARK))
+            if col in (2, 3, 5):
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            table.setItem(row, col, item)
 
     def prev_debt_report_page(self, table, page_label):
         if self.debt_report_current_page > 1:

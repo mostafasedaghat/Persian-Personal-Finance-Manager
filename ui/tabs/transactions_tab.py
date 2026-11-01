@@ -471,12 +471,12 @@ class TransactionsTab(QWidget):
         self.transaction_search_amount.setPlaceholderText("0")
 
         self.transaction_search_start_date = QLineEdit()
-        self.transaction_search_start_date.setPlaceholderText("1404/02/13")
+        self.transaction_search_start_date.setPlaceholderText("اختیاری")
         self.transaction_search_start_date.setReadOnly(True)
         self.transaction_search_start_date.mousePressEvent = \
             lambda event: self._popup_calendar(self.transaction_search_start_date)
         self.transaction_search_end_date = QLineEdit()
-        self.transaction_search_end_date.setPlaceholderText("1404/02/13")
+        self.transaction_search_end_date.setPlaceholderText("اختیاری")
         self.transaction_search_end_date.setReadOnly(True)
         self.transaction_search_end_date.mousePressEvent = \
             lambda event: self._popup_calendar(self.transaction_search_end_date)
@@ -487,6 +487,12 @@ class TransactionsTab(QWidget):
         form.addRow("از تاریخ (شمسی):", self.transaction_search_start_date)
         form.addRow("تا تاریخ (شمسی):", self.transaction_search_end_date)
         lay.addLayout(form)
+
+        # نکته: تاریخ‌ها اختیاری‌اند؛ هرکدام پر شود همان‌طور اعمال می‌شود
+        hint = QLabel("💡 تاریخ‌ها اختیاری‌اند؛ فقط «از تاریخ» یا فقط «تا تاریخ» را هم می‌توانید انتخاب کنید.")
+        hint.setObjectName("formLabel")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
 
         search_btn = QPushButton("📊 نمایش گزارش")
         search_btn.setObjectName("primaryBtn")
@@ -1348,22 +1354,41 @@ class TransactionsTab(QWidget):
             trans_type = self.transaction_search_type.currentText()
             person_id = self.transaction_search_person.currentData()
             amount = self.transaction_search_amount.get_raw_value()
-            start_date = self.transaction_search_start_date.text()
-            end_date = self.transaction_search_end_date.text()
+            start_date = self.transaction_search_start_date.text().strip()
+            end_date = self.transaction_search_end_date.text().strip()
 
-            if not start_date or not end_date:
-                QMessageBox.warning(
-                    self, "خطا", "فیلدهای تاریخ شروع و پایان ضروری هستند!")
-                return
-            if not is_valid_shamsi_date(start_date) or not is_valid_shamsi_date(end_date):
-                QMessageBox.warning(
-                    self, "خطا", "فرمت تاریخ باید به صورت 1404/02/19 باشد!")
-                return
+            # تاریخ‌ها اختیاری‌اند؛ هر کدام که پر شده باشد به‌تنهایی اعمال می‌شود
+            # (فقط تاریخ شروع → از آن روز به بعد؛ فقط تاریخ پایان → تا آن روز)
+            clauses = []
+            params = []
 
-            start_date_g = shamsi_to_gregorian(start_date)
-            end_date_g = shamsi_to_gregorian(end_date)
-            if not start_date_g or not end_date_g:
-                QMessageBox.warning(self, "خطا", "تاریخ شمسی نامعتبر است!")
+            if start_date:
+                if not is_valid_shamsi_date(start_date):
+                    QMessageBox.warning(
+                        self, "خطا", "فرمت تاریخ شروع باید به صورت 1404/02/19 باشد!")
+                    return
+                start_date_g = shamsi_to_gregorian(start_date)
+                if not start_date_g:
+                    QMessageBox.warning(self, "خطا", "تاریخ شروع شمسی نامعتبر است!")
+                    return
+                clauses.append("t.date >= ?")
+                params.append(start_date_g)
+
+            if end_date:
+                if not is_valid_shamsi_date(end_date):
+                    QMessageBox.warning(
+                        self, "خطا", "فرمت تاریخ پایان باید به صورت 1404/02/19 باشد!")
+                    return
+                end_date_g = shamsi_to_gregorian(end_date)
+                if not end_date_g:
+                    QMessageBox.warning(self, "خطا", "تاریخ پایان شمسی نامعتبر است!")
+                    return
+                clauses.append("t.date <= ?")
+                params.append(end_date_g)
+
+            if start_date and end_date and start_date > end_date:
+                QMessageBox.warning(
+                    self, "خطا", "تاریخ شروع نمی‌تواند بعد از تاریخ پایان باشد!")
                 return
 
             query = """
@@ -1372,23 +1397,24 @@ class TransactionsTab(QWidget):
                 JOIN accounts a ON t.account_id = a.id
                 LEFT JOIN persons p ON t.person_id = p.id
                 JOIN categories c ON t.category_id = c.id
-                WHERE t.date BETWEEN ? AND ?
             """
-            params = [start_date_g, end_date_g]
 
             if trans_type == "برداشت":
-                query += " AND c.type = 'expense' AND c.name != 'انتقال بین حساب‌ها (خروج)'"
+                clauses.append("c.type = 'expense' AND c.name != 'انتقال بین حساب‌ها (خروج)'")
             elif trans_type == "واریز":
-                query += " AND c.type = 'income' AND c.name != 'انتقال بین حساب‌ها (ورود)'"
+                clauses.append("c.type = 'income' AND c.name != 'انتقال بین حساب‌ها (ورود)'")
             elif trans_type == "انتقال":
-                query += " AND c.name IN ('انتقال بین حساب‌ها (ورود)', 'انتقال بین حساب‌ها (خروج)')"
+                clauses.append("c.name IN ('انتقال بین حساب‌ها (ورود)', 'انتقال بین حساب‌ها (خروج)')")
 
             if person_id:
-                query += " AND t.person_id = ?"
+                clauses.append("t.person_id = ?")
                 params.append(person_id)
             if amount:
-                query += " AND t.amount = ?"
+                clauses.append("t.amount = ?")
                 params.append(amount)
+
+            if clauses:
+                query += "WHERE " + " AND ".join(clauses)
 
             self.db_manager.execute(query, params)
             results = self.db_manager.fetchall()
@@ -1473,7 +1499,20 @@ class TransactionsTab(QWidget):
         """گرفتن خروجی از نتایج جستجو از طریق پنجره اصلی."""
         if self.parent_window is not None and \
                 hasattr(self.parent_window, 'export_report'):
-            self.parent_window.export_report(results, "transactions")
+            self.parent_window.export_report(
+                results, "transactions", self._search_date_range_text())
+
+    def _search_date_range_text(self):
+        """متن بازه تاریخ جستجو برای درج در سربرگ خروجی‌ها."""
+        start = self.transaction_search_start_date.text().strip()
+        end = self.transaction_search_end_date.text().strip()
+        if start and end:
+            return f"از {start} تا {end}"
+        if start:
+            return f"از {start} به بعد"
+        if end:
+            return f"تا {end}"
+        return "همه تاریخ‌ها"
 
     def update_transaction_report_table(self, table):
         start = (self.transaction_report_current_page - 1) * self.transaction_report_per_page
@@ -1516,6 +1555,44 @@ class TransactionsTab(QWidget):
                     id_item, date_item, account_item, person_item,
                     category_item, amount_item, desc_item, type_item]):
                 table.setItem(row, column, item)
+
+        # ---- ردیف «جمع کل» در انتهای صفحه آخر ----
+        if page_results and end >= len(self.transaction_report_results):
+            self._append_report_totals_row(table)
+
+    def _append_report_totals_row(self, table):
+        """افزودن ردیف جمع کل (درآمد/هزینه/خالص) به انتهای جدول گزارش."""
+        results = self.transaction_report_results
+        income = sum(r[5] or 0 for r in results if r[7] == "income")
+        expense = sum(r[5] or 0 for r in results if r[7] != "income")
+        net = income - expense
+
+        row = table.rowCount()
+        table.insertRow(row)
+
+        cells = [
+            "", "جمع کل", "", "", "",
+            format_amount(net),
+            f"جمع درآمد: {format_amount(income)} | جمع هزینه: {format_amount(expense)}",
+            "خالص",
+        ]
+        for col, text in enumerate(cells):
+            item = QTableWidgetItem(text)
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+            item.setBackground(QColor(SOFT_SLATE))
+            if col == 5:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setForeground(QColor(GREEN if net >= 0 else RED))
+            elif col == 6:
+                item.setForeground(QColor(TEXT_MUTED))
+            elif col == 7:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setForeground(QColor(SLATE))
+            else:
+                item.setForeground(QColor(TEXT_DARK))
+            table.setItem(row, col, item)
 
     def prev_transaction_report_page(self, table, page_label):
         if self.transaction_report_current_page > 1:
