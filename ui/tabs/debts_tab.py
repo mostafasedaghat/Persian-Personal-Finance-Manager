@@ -632,11 +632,11 @@ class DebtsTab(QWidget):
         # ستون‌های کم‌اهمیت‌تر (حساب/توضیحات) زیر اسکرول افقی بروند.
         self.debts_table = QTableWidget()
         self.debts_table.setObjectName("debtsTable")
-        self.debts_table.setColumnCount(10)
+        self.debts_table.setColumnCount(11)
         self.debts_table.setHorizontalHeaderLabels(
             ["عملیات", "نوع", "شخص", "مبلغ", "پرداخت", "باقی‌مانده",
-             "سررسید", "وضعیت", "حساب", "توضیحات"])
-        self._style_table(self.debts_table, stretch_column=9)
+             "سررسید", "وضعیت", "تاریخ تسویه", "حساب", "توضیحات"])
+        self._style_table(self.debts_table, stretch_column=10)
         # عرض ثابت برای ستون عملیات (ResizeToContents عرض ویجت‌های سلول را
         # محاسبه نمی‌کند؛ بدون این کار دکمه‌ها فشرده می‌شوند)
         self.debts_table.horizontalHeader().setSectionResizeMode(
@@ -1054,7 +1054,8 @@ class DebtsTab(QWidget):
             offset = (self.debts_current_page - 1) * self.debts_per_page
             self.db_manager.execute(
                 f"SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, "
-                f"d.is_paid, a.name, d.is_credit, d.description, d.person_id "
+                f"d.is_paid, a.name, d.is_credit, d.description, d.person_id, "
+                f"d.settled_date "
                 f"FROM debts d "
                 f"LEFT JOIN persons p ON d.person_id = p.id "
                 f"LEFT JOIN accounts a ON d.account_id = a.id "
@@ -1087,7 +1088,8 @@ class DebtsTab(QWidget):
 
             self.debts_table.setRowCount(len(debts))
             for row, (id, person, amount, paid, due_date, is_paid,
-                      account, is_credit, description, person_id) in enumerate(debts):
+                      account, is_credit, description, person_id,
+                      settled_date) in enumerate(debts):
                 is_credit = int(is_credit or 0)
                 remaining = (amount or 0) - (paid or 0)
                 self._row_person_ids[row] = person_id
@@ -1156,6 +1158,20 @@ class DebtsTab(QWidget):
                 status_item.setForeground(status_color)
                 status_item.setBackground(row_bg)
 
+                # ستون تاریخ تسویه (تاریخ واقعی پرداخت — نسخه ۲.۳)
+                # ردیف‌های تسویه‌شدهٔ قدیمی که تاریخ ندارند «—» نشان می‌دهند
+                settled_item = QTableWidgetItem(
+                    gregorian_to_shamsi(settled_date) if settled_date else "—")
+                settled_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if settled_date:
+                    settled_item.setForeground(QColor(TEXT_MUTED))
+                    settled_item.setBackground(row_bg)
+                    settled_item.setToolTip(
+                        f"تاریخ واقعی تسویه: {gregorian_to_shamsi(settled_date)}")
+                else:
+                    settled_item.setForeground(QColor(TEXT_MUTED))
+                    settled_item.setBackground(row_bg)
+
                 # ستون حساب
                 account_item = QTableWidgetItem(account or "-")
                 account_item.setForeground(QColor(TEXT_MUTED))
@@ -1170,7 +1186,7 @@ class DebtsTab(QWidget):
 
                 for column, item in enumerate([
                         type_item, person_item, amount_item, paid_item,
-                        remaining_item, due_item, status_item,
+                        remaining_item, due_item, status_item, settled_item,
                         account_item, desc_item], start=1):
                     self.debts_table.setItem(row, column, item)
 
@@ -1500,10 +1516,14 @@ class DebtsTab(QWidget):
                         (amount, account_id))
 
             # ذخیره در دیتابیس
+            # نکته: دکمه ویرایش فقط برای موارد «در جریان» نمایش داده می‌شود؛
+            # با این حال settled_date برای اطمینان پاک می‌شود تا وضعیت
+            # «تسویه‌شده» و «تاریخ تسویه» همیشه هماهنگ بمانند.
             self.db_manager.execute(
                 "UPDATE debts SET person_id = ?, amount = ?, account_id = ?, "
                 "due_date = ?, is_paid = 0, show_in_dashboard = ?, "
-                "description = ?, is_credit = ? WHERE id = ?",
+                "description = ?, is_credit = ?, settled_date = NULL "
+                "WHERE id = ?",
                 (person_id, amount, account_id_to_save, due_date,
                  1 if show_in_dashboard else 0, description,
                  1 if is_credit else 0, debt_id)
@@ -1638,6 +1658,27 @@ class DebtsTab(QWidget):
                         break
             layout.addRow("حساب مرتبط:", settle_account_combo)
 
+            # تاریخ تسویه (نسخه ۲.۳) — تاریخ واقعی پرداخت
+            # اگر پول در روزی غیر از امروز رد و بدل شده، همان روز انتخاب شود؛
+            # تراکنش مرتبط نیز با همین تاریخ ثبت می‌شود تا گزارش‌های ماهانه
+            # دقیق بمانند (مثلاً پرداخت روز ۱۰ که روز ۱۵ در سیستم ثبت می‌شود).
+            settle_date_edit = QLineEdit(
+                gregorian_to_shamsi(datetime.now().date().strftime("%Y-%m-%d")))
+            settle_date_edit.setReadOnly(True)
+            settle_date_edit.setPlaceholderText("1404/02/13")
+            settle_date_edit.mousePressEvent = \
+                lambda event: self._popup_calendar(settle_date_edit)
+            settle_date_edit.setStyleSheet(
+                "QLineEdit { color: #166534; font-weight: bold; }")
+            layout.addRow("تاریخ تسویه (شمسی):", settle_date_edit)
+
+            settle_date_hint = QLabel(
+                "💡 اگر پرداخت در تاریخ دیگری انجام شده، تاریخ واقعی را انتخاب کنید.")
+            settle_date_hint.setStyleSheet(
+                f"color: {TEXT_MUTED}; font-size: 12px; font-weight: normal;")
+            settle_date_hint.setWordWrap(True)
+            layout.addRow("", settle_date_hint)
+
             # کنترل فعال/غیرفعال بودن فیلدها بر اساس چک‌باکس
             def toggle_settle_fields(state):
                 is_checked = (state == Qt.CheckState.Checked.value)
@@ -1662,6 +1703,7 @@ class DebtsTab(QWidget):
                 settle_account_combo.currentData(),
                 is_credit,
                 settle_has_payment_checkbox.isChecked(),
+                settle_date_edit.text().strip(),
                 dialog
             ))
             layout.addRow(confirm_btn)
@@ -1672,7 +1714,20 @@ class DebtsTab(QWidget):
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
     def confirm_partial_payment(self, debt_id, payment_amount, account_id,
-                                is_credit, has_transfer_checked, dialog):
+                                is_credit, has_transfer_checked,
+                                shamsi_settle_date, dialog):
+        # اعتبارسنجی تاریخ تسویه (تاریخ واقعی پرداخت)
+        settle_date = datetime.now().strftime("%Y-%m-%d")
+        if shamsi_settle_date:
+            if not is_valid_shamsi_date(shamsi_settle_date):
+                QMessageBox.warning(
+                    dialog, "خطا", "فرمت تاریخ تسویه باید به صورت 1404/02/19 باشد!")
+                return
+            settle_date = shamsi_to_gregorian(shamsi_settle_date)
+            if not settle_date:
+                QMessageBox.warning(dialog, "خطا", "تاریخ تسویه نامعتبر است!")
+                return
+
         try:
             self.db_manager.execute(
                 "SELECT amount, paid_amount, person_id FROM debts WHERE id = ?",
@@ -1738,7 +1793,7 @@ class DebtsTab(QWidget):
                     return
                 category_id_from_db = category_id_from_db[0]
 
-                today_gregorian = datetime.now().strftime("%Y-%m-%d")
+                today_gregorian = settle_date  # تاریخ واقعی تسویه (نسخه ۲.۳)
 
                 self.db_manager.execute(
                     "SELECT name FROM persons WHERE id = ?", (person_id,))
@@ -1760,10 +1815,13 @@ class DebtsTab(QWidget):
 
             is_paid = 1 if new_paid_amount >= total_debt_amount else 0
 
+            # تاریخ تسویه فقط برای تسویه کامل ذخیره می‌شود (تاریخ آخرین/
+            # نهایی پرداخت)؛ در پرداخت جزئی مقدار قبلی حفظ می‌شود.
             self.db_manager.execute(
-                "UPDATE debts SET paid_amount = ?, is_paid = ?, account_id = ? "
-                "WHERE id = ?",
-                (new_paid_amount, is_paid, account_id, debt_id))
+                "UPDATE debts SET paid_amount = ?, is_paid = ?, account_id = ?, "
+                "settled_date = ? WHERE id = ?",
+                (new_paid_amount, is_paid, account_id,
+                 settle_date if is_paid else None, debt_id))
 
             self.db_manager.commit()
             self.load_debts()
@@ -1771,7 +1829,8 @@ class DebtsTab(QWidget):
             dialog.accept()
             QMessageBox.information(
                 self, "موفق",
-                f"پرداخت به مبلغ {format_amount(payment_amount)} ریال ثبت شد! "
+                f"پرداخت به مبلغ {format_amount(payment_amount)} ریال در تاریخ "
+                f"{gregorian_to_shamsi(settle_date)} ثبت شد! "
                 f"وضعیت تسویه: {'کامل' if is_paid else 'جزئی'}")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
@@ -1832,7 +1891,8 @@ class DebtsTab(QWidget):
 
             query = (
                 "SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, "
-                "d.is_paid, COALESCE(a.name, '-'), d.is_credit, d.description "
+                "d.is_paid, COALESCE(a.name, '-'), d.is_credit, d.description, "
+                "d.settled_date "
                 "FROM debts d "
                 "LEFT JOIN persons p ON d.person_id = p.id "
                 "LEFT JOIN accounts a ON d.account_id = a.id "
@@ -1860,7 +1920,7 @@ class DebtsTab(QWidget):
         debt_total = credit_total = 0.0
         debt_count = credit_count = 0
         for (_id, _person, amount, paid, _due, is_paid,
-             _account, is_credit, _desc) in results:
+             _account, is_credit, _desc, _settled) in results:
             if is_paid:
                 continue
             remaining = (amount or 0) - (paid or 0)
@@ -1889,11 +1949,11 @@ class DebtsTab(QWidget):
         dialog.setLayout(layout)
 
         table = QTableWidget()
-        table.setColumnCount(9)
+        table.setColumnCount(10)
         table.setHorizontalHeaderLabels(
             ["شناسه", "شخص", "مبلغ", "پرداخت‌شده", "سررسید",
-             "وضعیت", "حساب", "نوع", "توضیحات"])
-        self._style_table(table, stretch_column=8)
+             "وضعیت", "تاریخ تسویه", "حساب", "نوع", "توضیحات"])
+        self._style_table(table, stretch_column=9)
         table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: white; alternate-background-color: #f8fafc;
@@ -2037,7 +2097,8 @@ class DebtsTab(QWidget):
         page_results = self.debt_report_results[start:end]
         table.setRowCount(len(page_results))
         for row, (id, person, amount, paid, due_date, is_paid,
-                  account, is_credit, description) in enumerate(page_results):
+                  account, is_credit, description, settled_date) in \
+                enumerate(page_results):
             is_credit = int(is_credit or 0)
             type_color = QColor(GREEN if is_credit else RED)
 
@@ -2071,6 +2132,12 @@ class DebtsTab(QWidget):
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             status_item.setForeground(status_color)
 
+            # تاریخ تسویه (نسخه ۲.۳) — برای موارد قدیمی «—»
+            settled_item = QTableWidgetItem(
+                gregorian_to_shamsi(settled_date) if settled_date else "—")
+            settled_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            settled_item.setForeground(QColor(TEXT_MUTED))
+
             account_item = QTableWidgetItem(account or "-")
             account_item.setForeground(QColor(TEXT_MUTED))
 
@@ -2086,7 +2153,8 @@ class DebtsTab(QWidget):
 
             for column, item in enumerate([
                     id_item, person_item, amount_item, paid_item, due_item,
-                    status_item, account_item, type_item, desc_item]):
+                    status_item, settled_item, account_item, type_item,
+                    desc_item]):
                 table.setItem(row, column, item)
 
         # ---- ردیف «جمع کل» در انتهای صفحه آخر ----
@@ -2109,6 +2177,7 @@ class DebtsTab(QWidget):
             format_amount(total_paid),
             "",
             f"{len(results)} مورد",
+            "",
             "", "",
             f"باقی‌مانده: {format_amount(remaining)}",
         ]

@@ -155,6 +155,7 @@ class FinanceApp(QMainWindow):
                     show_in_dashboard INTEGER DEFAULT 0,
                     is_credit INTEGER DEFAULT 0,
                     description TEXT,
+                    settled_date TEXT,
                     FOREIGN KEY (person_id) REFERENCES persons(id),
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 );
@@ -179,6 +180,7 @@ class FinanceApp(QMainWindow):
                     amount REAL,
                     due_date TEXT,
                     is_paid INTEGER DEFAULT 0,
+                    paid_date TEXT,
                     FOREIGN KEY (loan_id) REFERENCES loans(id)
                 );
                 CREATE TABLE IF NOT EXISTS persons (
@@ -210,6 +212,17 @@ class FinanceApp(QMainWindow):
                 self.db_manager.execute("ALTER TABLE debts ADD COLUMN show_in_dashboard INTEGER DEFAULT 0")
             if "description" not in columns:
                 self.db_manager.execute("ALTER TABLE debts ADD COLUMN description TEXT")
+            # نسخه ۲.۳ — تاریخ تسویه (تاریخ واقعی پرداخت، نه تاریخ ثبت در برنامه).
+            # ستونی اختیاری است: ردیف‌های قدیمی NULL می‌مانند و «—» نمایش داده می‌شود.
+            if "settled_date" not in columns:
+                self.db_manager.execute("ALTER TABLE debts ADD COLUMN settled_date TEXT")
+
+            # نسخه ۲.۳ — تاریخ پرداخت واقعی هر قسط وام
+            self.db_manager.execute("PRAGMA table_info(loan_installments)")
+            installment_columns = [col[1] for col in self.db_manager.fetchall()]
+            if "paid_date" not in installment_columns:
+                self.db_manager.execute(
+                    "ALTER TABLE loan_installments ADD COLUMN paid_date TEXT")
 
             # به‌روزرسانی جدول loans برای حذف end_date و افزودن installment_amount و installment_interval
             self.db_manager.execute("PRAGMA table_info(loans)")
@@ -301,6 +314,7 @@ class FinanceApp(QMainWindow):
     def init_ui(self):
         tabs = QTabWidget()
         tabs.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.tabs_widget = tabs
 
         self.dashboard_tab = DashboardTab(self.db_manager)
         # ساخت تب حساب‌ها (ماژول مستقل)
@@ -345,17 +359,26 @@ class FinanceApp(QMainWindow):
     def on_tab_changed(self, index):
         if index == 0:  # تب داشبورد
             self.dashboard_tab.update_dashboard()
+        elif self.tabs_widget.widget(index) is self.persons_tab:
+            # رفع باگ: هنگام مراجعه به تب اشخاص، وضعیت بدهی/طلب و تعداد
+            # تراکنش‌های هر شخص همیشه با آخرین تغییرات به‌روز شود.
+            self.persons_tab.refresh()
 
     def on_transactions_data_changed(self):
         """پس از هر تغییر در تراکنش‌ها: به‌روزرسانی موجودی حساب‌ها و داشبورد"""
         self.load_accounts()
         self.dashboard_tab.update_dashboard()
+        # تب اشخاص تعداد تراکنش هر شخص را نشان می‌دهد؛ تازه شود
+        self.persons_tab.refresh()
 
     def on_debts_data_changed(self):
         """پس از هر تغییر در بدهی/طلب: به‌روزرسانی حساب‌ها، تراکنش‌ها و داشبورد"""
         self.load_accounts()
         self.transactions_tab.refresh()
         self.dashboard_tab.update_dashboard()
+        # رفع باگ: وضعیت بدهی/طلب اشخاص در تب «اشخاص» به‌روز نشده بود و
+        # تنها با بستن و باز کردن برنامه اصلاح می‌شد.
+        self.persons_tab.refresh()
 
     def on_loans_data_changed(self):
         """پس از هر تغییر در وام‌ها (ثبت/ویرایش/تسویه قسط): به‌روزرسانی حساب‌ها و داشبورد"""

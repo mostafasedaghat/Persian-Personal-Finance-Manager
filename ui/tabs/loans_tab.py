@@ -1675,7 +1675,7 @@ class LoansTab(QWidget):
              installment_amount) = loan
 
             self.db_manager.execute(
-                "SELECT id, amount, due_date, is_paid "
+                "SELECT id, amount, due_date, is_paid, paid_date "
                 "FROM loan_installments WHERE loan_id = ? "
                 "ORDER BY due_date",
                 (loan_id,))
@@ -1734,9 +1734,9 @@ class LoansTab(QWidget):
         # ---- جدول اقساط ----
         table = QTableWidget()
         table.setObjectName("dialogTable")
-        table.setColumnCount(5)
+        table.setColumnCount(6)
         table.setHorizontalHeaderLabels(
-            ["#", "مبلغ", "سررسید", "وضعیت", "عملیات"])
+            ["#", "مبلغ", "سررسید", "تاریخ پرداخت", "وضعیت", "عملیات"])
         table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         table.verticalHeader().setVisible(False)
         table.verticalHeader().setDefaultSectionSize(40)
@@ -1754,7 +1754,7 @@ class LoansTab(QWidget):
         table.horizontalHeader().setStretchLastSection(False)
 
         table.setRowCount(len(installments))
-        for row, (inst_id, amount, due_date, is_paid) in \
+        for row, (inst_id, amount, due_date, is_paid, paid_date) in \
                 enumerate(installments):
             # شماره قسط
             number_item = QTableWidgetItem(str(row + 1))
@@ -1788,6 +1788,14 @@ class LoansTab(QWidget):
                 due_item.setForeground(QColor(TEXT_DARK))
             table.setItem(row, 2, due_item)
 
+            # تاریخ پرداخت واقعی (نسخه ۲.۳) — اقساط قدیمی «—» نشان می‌دهند
+            paid_date_item = QTableWidgetItem(
+                gregorian_to_shamsi(paid_date) if paid_date else "—")
+            paid_date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            paid_date_item.setForeground(
+                QColor(TEXT_MUTED) if not paid_date else QColor(GREEN))
+            table.setItem(row, 3, paid_date_item)
+
             # وضعیت
             if is_paid:
                 status_text, status_color = "✓ پرداخت‌شده", QColor(GREEN)
@@ -1801,7 +1809,7 @@ class LoansTab(QWidget):
             status_item.setFont(status_font)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             status_item.setForeground(status_color)
-            table.setItem(row, 3, status_item)
+            table.setItem(row, 4, status_item)
 
             # عملیات
             if not is_paid:
@@ -1826,12 +1834,12 @@ class LoansTab(QWidget):
 
                 actions_layout.addWidget(edit_btn)
                 actions_layout.addWidget(settle_btn)
-                table.setCellWidget(row, 4, actions)
+                table.setCellWidget(row, 5, actions)
             else:
                 dash_item = QTableWidgetItem("—")
                 dash_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 dash_item.setForeground(QColor(TEXT_MUTED))
-                table.setItem(row, 4, dash_item)
+                table.setItem(row, 5, dash_item)
 
         layout.addWidget(table, 1)
         dialog.resize(720, 560)
@@ -1954,21 +1962,56 @@ class LoansTab(QWidget):
                 f"{name} (موجودی: {format_number(balance)} ریال)"
             account_combo.addItem(display_text, acc_id)
 
+        # تاریخ پرداخت واقعی (نسخه ۲.۳) — اگر قسط در روزی غیر از امروز
+        # پرداخت شده، تاریخ واقعی انتخاب شود تا سابقه دقیق بماند.
+        settle_date_edit = QLineEdit(
+            gregorian_to_shamsi(datetime.now().date().strftime("%Y-%m-%d")))
+        settle_date_edit.setReadOnly(True)
+        settle_date_edit.setPlaceholderText("1404/02/13")
+        settle_date_edit.mousePressEvent = \
+            lambda event: self._popup_calendar(settle_date_edit)
+        settle_date_edit.setStyleSheet(
+            "QLineEdit { color: #166534; font-weight: bold; }")
+
+        settle_date_hint = QLabel(
+            "💡 تاریخ واقعی پرداخت قسط را انتخاب کنید (پیش‌فرض: امروز).")
+        settle_date_hint.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: 12px; font-weight: normal;")
+        settle_date_hint.setWordWrap(True)
+
         save_btn = QPushButton("✅ تسویه")
         save_btn.setObjectName("primaryBtn")
         save_btn.setMinimumHeight(42)
         save_btn.clicked.connect(
             lambda: self.confirm_settle_installment(
                 installment_id, loan_id, amount,
-                account_combo.currentData(), dialog, parent_dialog))
+                account_combo.currentData(),
+                settle_date_edit.text().strip(),
+                dialog, parent_dialog))
 
         layout.addRow(amount_label)
         layout.addRow("حساب برای برداشت:", account_combo)
+        layout.addRow("تاریخ پرداخت (شمسی):", settle_date_edit)
+        layout.addRow("", settle_date_hint)
         layout.addRow(save_btn)
         dialog.exec()
 
     def confirm_settle_installment(self, installment_id, loan_id, amount,
-                                   account_id, dialog, parent_dialog):
+                                   account_id, shamsi_settle_date,
+                                   dialog, parent_dialog):
+        # اعتبارسنجی تاریخ پرداخت واقعی قسط (نسخه ۲.۳)
+        paid_date = datetime.now().strftime("%Y-%m-%d")
+        if shamsi_settle_date:
+            if not is_valid_shamsi_date(shamsi_settle_date):
+                QMessageBox.warning(
+                    dialog, "خطا",
+                    "فرمت تاریخ پرداخت باید به صورت 1404/02/19 باشد!")
+                return
+            paid_date = shamsi_to_gregorian(shamsi_settle_date)
+            if not paid_date:
+                QMessageBox.warning(dialog, "خطا", "تاریخ پرداخت نامعتبر است!")
+                return
+
         try:
             # بررسی موجودی حساب
             self.db_manager.execute(
@@ -1987,10 +2030,11 @@ class LoansTab(QWidget):
                 "UPDATE accounts SET balance = balance - ? "
                 "WHERE id = ?", (amount, account_id))
 
-            # علامت‌گذاری قسط به‌عنوان پرداخت‌شده
+            # علامت‌گذاری قسط به‌عنوان پرداخت‌شده + ثبت تاریخ واقعی پرداخت
             self.db_manager.execute(
-                "UPDATE loan_installments SET is_paid = 1 "
-                "WHERE id = ?", (installment_id,))
+                "UPDATE loan_installments SET is_paid = 1, paid_date = ? "
+                "WHERE id = ?",
+                (paid_date, installment_id))
 
             # به‌روزرسانی تعداد اقساط پرداخت‌شده و مبلغ پرداخت‌شده وام
             self.db_manager.execute(
@@ -2008,7 +2052,9 @@ class LoansTab(QWidget):
             self.refresh()
             self.data_changed.emit()
             QMessageBox.information(
-                self, "موفق", "قسط با موفقیت تسویه شد!")
+                self, "موفق",
+                f"قسط در تاریخ {gregorian_to_shamsi(paid_date)} "
+                "با موفقیت تسویه شد!")
             self.view_installments(loan_id)  # باز کردن مجدد لیست اقساط
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
@@ -2020,7 +2066,7 @@ class LoansTab(QWidget):
         try:
             self.db_manager.execute(
                 """
-                SELECT id, amount, due_date, is_paid
+                SELECT id, amount, due_date, is_paid, paid_date
                 FROM loan_installments WHERE loan_id = ?
                 ORDER BY due_date
                 """,
@@ -2036,11 +2082,13 @@ class LoansTab(QWidget):
 
             # پردازش داده‌ها برای خروجی
             processed_data = []
-            for id, amount, due_date, is_paid in installments:
+            for id, amount, due_date, is_paid, paid_date in installments:
                 status_text = "پرداخت‌شده" if is_paid else "پرداخت‌نشده"
                 processed_data.append(
                     (id, format_number(amount),
-                     gregorian_to_shamsi(due_date), status_text))
+                     gregorian_to_shamsi(due_date),
+                     gregorian_to_shamsi(paid_date) if paid_date else "-",
+                     status_text))
 
             if self.parent_window is not None and \
                     hasattr(self.parent_window, 'export_report'):

@@ -15,8 +15,8 @@ This is a personal finance management application built using PyQt6 for the grap
 **فارسی**  
 - **مدیریت حساب‌ها**: ایجاد، ویرایش و حذف حساب‌های بانکی با نمایش موجودی.  
 - **تراکنش‌ها**: ثبت، ویرایش و جستجوی تراکنش‌های درآمدی و هزینه‌ای با دسته‌بندی.  
-- **بدهی و طلب**: مدیریت بدهی‌ها و طلب‌ها با امکان ثبت تاریخ سررسید، پرداخت جزئی، و توضیحات.  
-- **وام‌ها**: ثبت و مدیریت وام‌های گرفته‌شده یا داده‌شده با جزئیات اقساط.  
+- **بدهی و طلب**: مدیریت بدهی‌ها و طلب‌ها با امکان ثبت تاریخ سررسید، پرداخت جزئی، توضیحات و **تاریخ تسویه واقعی** (اگر پرداخت در روزی غیر از روز ثبت انجام شده باشد، تاریخ واقعی انتخاب می‌شود و تراکنش مرتبط نیز با همان تاریخ ثبت می‌گردد).  
+- **وام‌ها**: ثبت و مدیریت وام‌های گرفته‌شده یا داده‌شده با جزئیات اقساط و **تاریخ پرداخت واقعی هر قسط**.  
 - **گزارش‌گیری حرفه‌ای**: مرکز گزارش‌ها با ۹ گزارش کامل (وضعیت مالی، هزینه/درآمد، ماهانه با نمودار، اشخاص، تراکنش‌ها، بدهی/طلب، دسته‌بندی‌ها، حساب‌ها، وام‌ها) با خروجی اکسل، CSV، و PDF — همه با ردیف «جمع کل» خودکار.  
 - **تقویم شمسی**: پشتیبانی از تاریخ شمسی برای ثبت و نمایش تاریخ‌ها.  
 - **امنیت**: رمزنگاری رمزهای عبور با استفاده از bcrypt.  
@@ -27,8 +27,8 @@ This is a personal finance management application built using PyQt6 for the grap
 **English**  
 - **Account Management**: Create, edit, and delete bank accounts with balance tracking.  
 - **Transactions**: Record, edit, and search income and expense transactions with categorization.  
-- **Debts and Credits**: Manage debts and credits with due dates, partial payments, and descriptions.  
-- **Loans**: Record and manage taken or given loans with installment details.  
+- **Debts and Credits**: Manage debts and credits with due dates, partial payments, descriptions, and a **real settlement date** (if the payment happened on a different day than the registration day, pick the actual date — the linked transaction is recorded with that date too).  
+- **Loans**: Record and manage taken or given loans with installment details and the **actual paid date of each installment**.  
 - **Professional Reporting**: A report center with 9 complete reports (financial overview, income/expense, monthly with charts, persons, transactions, debts/credits, categories, accounts, loans) with Excel, CSV, and PDF export — all with an automatic grand-total row.  
 - **Persian Calendar**: Support for Shamsi (Persian) dates for recording and displaying dates.  
 - **Security**: Password encryption using bcrypt.  

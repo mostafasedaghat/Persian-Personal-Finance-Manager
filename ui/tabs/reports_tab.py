@@ -1251,7 +1251,8 @@ class ReportsTab(QWidget):
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
             query = f"""
                 SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date,
-                       d.is_paid, COALESCE(a.name, '-'), d.is_credit, d.description
+                       d.is_paid, COALESCE(a.name, '-'), d.is_credit,
+                       d.description, d.settled_date
                 FROM debts d
                 LEFT JOIN persons p ON d.person_id = p.id
                 LEFT JOIN accounts a ON d.account_id = a.id
@@ -1280,12 +1281,13 @@ class ReportsTab(QWidget):
                  format_amount(r[3]),
                  gregorian_to_shamsi(r[4]) if r[4] else "-",
                  "تسویه‌شده" if r[5] else "در جریان",
+                 gregorian_to_shamsi(r[9]) if r[9] else "—",
                  r[6] or "-", "طلب" if r[7] else "بدهی", r[8] or "-"]
                 for r in results
             ]
             total_row = ["", "جمع کل", format_amount(total_amount),
                          format_amount(total_paid), "",
-                         f"{len(results)} مورد", "", "",
+                         f"{len(results)} مورد", "", "", "",
                          f"باقی‌مانده: {format_amount(total_amount - total_paid)}"]
             dialog.accept()
 
@@ -1294,7 +1296,7 @@ class ReportsTab(QWidget):
                 subtitle=(f"نوع: {debt_type} — وضعیت: {status} — "
                           + self._dates_subtitle(start_edit, end_edit)),
                 columns=["شناسه", "شخص", "مبلغ", "پرداخت‌شده", "سررسید",
-                         "وضعیت", "حساب", "نوع", "توضیحات"],
+                         "وضعیت", "تاریخ تسویه", "حساب", "نوع", "توضیحات"],
                 rows=display_rows,
                 report_type="debts",
                 raw_data=results,
