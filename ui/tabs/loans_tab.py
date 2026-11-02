@@ -1939,6 +1939,19 @@ class LoansTab(QWidget):
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             return
 
+        # نوع وام جهت جهت‌گذاری صحیح گردش پول (نسخه ۲.۴):
+        # وام گرفته‌شده → پرداخت قسط = برداشت از حساب
+        # وام داده‌شده  → دریافت قسط = واریز به حساب
+        is_taken = True
+        try:
+            self.db_manager.execute(
+                "SELECT type FROM loans WHERE id = ?", (loan_id,))
+            loan_row = self.db_manager.fetchone()
+            if loan_row:
+                is_taken = (loan_row[0] == "taken")
+        except sqlite3.Error:
+            pass
+
         dialog = QDialog(self)
         dialog.setWindowTitle("تسویه قسط")
         dialog.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -1974,7 +1987,8 @@ class LoansTab(QWidget):
             "QLineEdit { color: #166534; font-weight: bold; }")
 
         settle_date_hint = QLabel(
-            "💡 تاریخ واقعی پرداخت قسط را انتخاب کنید (پیش‌فرض: امروز).")
+            "💡 تاریخ واقعی پرداخت قسط را انتخاب کنید (پیش‌فرض: امروز). "
+            "تراکنش مرتبط نیز با همین تاریخ ثبت می‌شود.")
         settle_date_hint.setStyleSheet(
             f"color: {TEXT_MUTED}; font-size: 12px; font-weight: normal;")
         settle_date_hint.setWordWrap(True)
@@ -1989,8 +2003,10 @@ class LoansTab(QWidget):
                 settle_date_edit.text().strip(),
                 dialog, parent_dialog))
 
+        account_label = "حساب برای برداشت:" if is_taken \
+            else "حساب برای واریز:"
         layout.addRow(amount_label)
-        layout.addRow("حساب برای برداشت:", account_combo)
+        layout.addRow(account_label, account_combo)
         layout.addRow("تاریخ پرداخت (شمسی):", settle_date_edit)
         layout.addRow("", settle_date_hint)
         layout.addRow(save_btn)
@@ -2013,7 +2029,32 @@ class LoansTab(QWidget):
                 return
 
         try:
-            # بررسی موجودی حساب
+            # اطلاعات وام (نوع + عنوان) برای جهت گردش پول و شرح تراکنش
+            self.db_manager.execute(
+                "SELECT type, bank_name FROM loans WHERE id = ?", (loan_id,))
+            loan_row = self.db_manager.fetchone()
+            if not loan_row:
+                QMessageBox.warning(self, "خطا", "وام یافت نشد!")
+                return
+            loan_type, loan_title = loan_row
+            is_taken = (loan_type == "taken")
+
+            # شماره ترتیبی قسط برای شرح تراکنش
+            self.db_manager.execute(
+                """
+                SELECT COUNT(*) FROM loan_installments
+                WHERE loan_id = ? AND (
+                    due_date < (SELECT due_date FROM loan_installments
+                                WHERE id = ?)
+                    OR (due_date = (SELECT due_date FROM loan_installments
+                                    WHERE id = ?)
+                        AND id <= ?))
+                """,
+                (loan_id, installment_id, installment_id, installment_id))
+            count_row = self.db_manager.fetchone()
+            installment_number = count_row[0] if count_row else 1
+
+            # بررسی موجودی حساب (فقط برای وام گرفته‌شده — برداشت پول)
             self.db_manager.execute(
                 "SELECT balance FROM accounts WHERE id = ?", (account_id,))
             row = self.db_manager.fetchone()
@@ -2021,14 +2062,49 @@ class LoansTab(QWidget):
                 QMessageBox.warning(self, "خطا", "حساب یافت نشد!")
                 return
             balance = row[0]
-            if balance < amount:
+            if is_taken and balance < amount:
                 QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
                 return
 
             # به‌روزرسانی موجودی حساب
+            # وام گرفته‌شده → پرداخت قسط (کم از حساب)
+            # وام داده‌شده → دریافت قسط (اضافه به حساب)
+            if is_taken:
+                self.db_manager.execute(
+                    "UPDATE accounts SET balance = balance - ? "
+                    "WHERE id = ?", (amount, account_id))
+            else:
+                self.db_manager.execute(
+                    "UPDATE accounts SET balance = balance + ? "
+                    "WHERE id = ?", (amount, account_id))
+
+            # ثبت تراکنش مرتبط (نسخه ۲.۴) — با تاریخ واقعی پرداخت قسط،
+            # تا در تب تراکنش‌ها و گزارش‌ها دیده شود.
+            category_name = "پرداخت قسط وام" if is_taken \
+                else "دریافت قسط وام"
+            category_type = "expense" if is_taken else "income"
             self.db_manager.execute(
-                "UPDATE accounts SET balance = balance - ? "
-                "WHERE id = ?", (amount, account_id))
+                "SELECT id FROM categories WHERE name = ? AND type = ?",
+                (category_name, category_type))
+            category_row = self.db_manager.fetchone()
+            if not category_row:
+                QMessageBox.critical(
+                    self, "خطا",
+                    f"خطای سیستمی: دسته‌بندی '{category_name}' یافت نشد. "
+                    "لطفاً برنامه را مجدداً راه‌اندازی کنید یا با پشتیبانی "
+                    "تماس بگیرید.")
+                self.db_manager.rollback()
+                return
+            category_id = category_row[0]
+
+            action_word = "پرداخت" if is_taken else "دریافت"
+            description = (
+                f"{action_word} قسط {installment_number or 1} از وام "
+                f"«{loan_title or '-'}» به مبلغ {format_amount(amount)} ریال")
+            self.db_manager.execute(
+                "INSERT INTO transactions (account_id, person_id, category_id, "
+                "amount, date, description) VALUES (?, NULL, ?, ?, ?, ?)",
+                (account_id, category_id, amount, paid_date, description))
 
             # علامت‌گذاری قسط به‌عنوان پرداخت‌شده + ثبت تاریخ واقعی پرداخت
             self.db_manager.execute(
@@ -2054,10 +2130,13 @@ class LoansTab(QWidget):
             QMessageBox.information(
                 self, "موفق",
                 f"قسط در تاریخ {gregorian_to_shamsi(paid_date)} "
-                "با موفقیت تسویه شد!")
+                "با موفقیت تسویه شد!\n"
+                f"یک تراکنش «{category_name}» نیز در تب تراکنش‌ها "
+                "ثبت شد.")
             self.view_installments(loan_id)  # باز کردن مجدد لیست اقساط
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            self.db_manager.rollback()
 
     # ------------------------------------------------------------------ #
     # خروجی گزارش اقساط یک وام

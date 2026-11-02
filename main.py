@@ -276,6 +276,8 @@ class FinanceApp(QMainWindow):
             self.db_manager.commit()
 
             # افزودن دسته‌بندی‌های پیش‌فرض
+            # نسخه ۲.۴ — «پرداخت قسط وام» و «دریافت قسط وام»: از این پس هنگام
+            # تسویه هر قسط، یک تراکنش واقعی در تب تراکنش‌ها ثبت می‌شود.
             self.db_manager.execute("SELECT COUNT(*) FROM categories")
             if self.db_manager.fetchone()[0] == 0:
                 self.db_manager.executescript("""
@@ -286,14 +288,18 @@ class FinanceApp(QMainWindow):
                     ('سایر هزینه‌ها', 'expense'),
                     ('انتقال بین حساب‌ها (خروج)', 'expense'), ('انتقال بین حساب‌ها (ورود)', 'income'),
                     ('تسویه طلب', 'income'),
-                    ('تسویه بدهی', 'expense');                                               
+                    ('تسویه بدهی', 'expense'),
+                    ('پرداخت قسط وام', 'expense'),
+                    ('دریافت قسط وام', 'income');                                                
                 """)
                 self.db_manager.commit()
             else:
                 self.db_manager.executescript("""
                     INSERT OR IGNORE INTO categories (name, type) VALUES
                     ('تسویه طلب', 'income'),
-                    ('تسویه بدهی', 'expense');
+                    ('تسویه بدهی', 'expense'),
+                    ('پرداخت قسط وام', 'expense'),
+                    ('دریافت قسط وام', 'income');
                 """)
                 self.db_manager.commit()
 
@@ -384,6 +390,9 @@ class FinanceApp(QMainWindow):
         """پس از هر تغییر در وام‌ها (ثبت/ویرایش/تسویه قسط): به‌روزرسانی حساب‌ها و داشبورد"""
         self.load_accounts()
         self.dashboard_tab.update_dashboard()
+        # نسخه ۲.۴ — تسویه قسط حالا تراکنش واقعی ثبت می‌کند؛ تب
+        # تراکنش‌ها هم باید بلافاصله تازه شود تا تراکنش جدید دیده شود.
+        self.transactions_tab.refresh()
 
     def on_persons_data_changed(self):
         """پس از هر تغییر در اشخاص: به‌روزرسانی کامبوباکس‌های سایر تب‌ها"""

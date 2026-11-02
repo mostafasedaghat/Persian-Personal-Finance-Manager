@@ -19,8 +19,8 @@ import os
 import sys
 
 APP_NAME = "نرم‌افزار حسابداری شخصی"
-APP_VERSION = "2.3"
-APP_RELEASE_NAME = "تاریخ تسویه"
+APP_VERSION = "2.4"
+APP_RELEASE_NAME = "تراکنش خودکار اقساط"
 
 
 # ------------------------------------------------------------------ #
