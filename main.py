@@ -140,6 +140,7 @@ class FinanceApp(QMainWindow):
                     amount REAL,
                     date TEXT,
                     description TEXT,
+                    debt_id INTEGER,
                     FOREIGN KEY (account_id) REFERENCES accounts(id),
                     FOREIGN KEY (person_id) REFERENCES persons(id),
                     FOREIGN KEY (category_id) REFERENCES categories(id)
@@ -156,6 +157,8 @@ class FinanceApp(QMainWindow):
                     is_credit INTEGER DEFAULT 0,
                     description TEXT,
                     settled_date TEXT,
+                    payment_date TEXT,
+                    reg_transaction_id INTEGER,
                     FOREIGN KEY (person_id) REFERENCES persons(id),
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 );
@@ -216,6 +219,13 @@ class FinanceApp(QMainWindow):
             # ستونی اختیاری است: ردیف‌های قدیمی NULL می‌مانند و «—» نمایش داده می‌شود.
             if "settled_date" not in columns:
                 self.db_manager.execute("ALTER TABLE debts ADD COLUMN settled_date TEXT")
+            # نسخه ۲.۵ — تاریخ واقعی رد و بدل پول هنگام «ثبت» بدهی/طلب
+            # (مستقل از تاریخ سررسید) + شناسه تراکنش ثبتِ مرتبط.
+            if "payment_date" not in columns:
+                self.db_manager.execute("ALTER TABLE debts ADD COLUMN payment_date TEXT")
+            if "reg_transaction_id" not in columns:
+                self.db_manager.execute(
+                    "ALTER TABLE debts ADD COLUMN reg_transaction_id INTEGER")
 
             # نسخه ۲.۳ — تاریخ پرداخت واقعی هر قسط وام
             self.db_manager.execute("PRAGMA table_info(loan_installments)")
@@ -223,6 +233,14 @@ class FinanceApp(QMainWindow):
             if "paid_date" not in installment_columns:
                 self.db_manager.execute(
                     "ALTER TABLE loan_installments ADD COLUMN paid_date TEXT")
+
+            # نسخه ۲.۵ — پیوند تراکنش‌های مرتبط با بدهی/طلب (ثبت و تسویه)
+            # به خود بدهی؛ برای پاکسازی صحیح هنگام حذف/ویرایش.
+            self.db_manager.execute("PRAGMA table_info(transactions)")
+            txn_columns = [col[1] for col in self.db_manager.fetchall()]
+            if "debt_id" not in txn_columns:
+                self.db_manager.execute(
+                    "ALTER TABLE transactions ADD COLUMN debt_id INTEGER")
 
             # به‌روزرسانی جدول loans برای حذف end_date و افزودن installment_amount و installment_interval
             self.db_manager.execute("PRAGMA table_info(loans)")
@@ -290,7 +308,9 @@ class FinanceApp(QMainWindow):
                     ('تسویه طلب', 'income'),
                     ('تسویه بدهی', 'expense'),
                     ('پرداخت قسط وام', 'expense'),
-                    ('دریافت قسط وام', 'income');                                                
+                    ('دریافت قسط وام', 'income'),
+                    ('قرض دادن', 'expense'),
+                    ('قرض گرفتن', 'income');                                                
                 """)
                 self.db_manager.commit()
             else:
@@ -299,7 +319,9 @@ class FinanceApp(QMainWindow):
                     ('تسویه طلب', 'income'),
                     ('تسویه بدهی', 'expense'),
                     ('پرداخت قسط وام', 'expense'),
-                    ('دریافت قسط وام', 'income');
+                    ('دریافت قسط وام', 'income'),
+                    ('قرض دادن', 'expense'),
+                    ('قرض گرفتن', 'income');
                 """)
                 self.db_manager.commit()
 

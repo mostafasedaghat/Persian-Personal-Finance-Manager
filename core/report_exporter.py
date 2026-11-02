@@ -107,11 +107,12 @@ def _t_transactions(raw):
 
 def _b_debts(raw):
     rows = []
-    for (tid, person, amount, paid, due, is_paid, account, is_credit,
-         desc, settled_date) in raw:
+    for (tid, person, amount, paid, due, payment_date, is_paid, account,
+         is_credit, desc, settled_date) in raw:
         rows.append([
             str(tid), person or "-", _num(amount), _num(paid),
             gregorian_to_shamsi(due) if due else "-",
+            gregorian_to_shamsi(payment_date) if payment_date else "-",
             "تسویه‌شده" if is_paid else "در جریان",
             gregorian_to_shamsi(settled_date) if settled_date else "-",
             account or "-",
@@ -125,7 +126,7 @@ def _t_debts(raw):
     total_amount = sum(_num(r[2]) for r in raw)
     total_paid = sum(_num(r[3]) for r in raw)
     return [
-        "", TOTAL_LABEL, _num(total_amount), _num(total_paid), "",
+        "", TOTAL_LABEL, _num(total_amount), _num(total_paid), "", "",
         f"{len(raw)} مورد", "", "", "",
         f"باقی‌مانده: {format_amount(total_amount - total_paid)}",
     ]
@@ -271,12 +272,14 @@ SPECS = {
     "debts": {
         "title": "گزارش بدهی/طلب",
         "file_prefix": "debts_report",
-        "columns": ["شناسه", "شخص", "مبلغ", "پرداخت‌شده", "سررسید", "وضعیت",
-                    "تاریخ تسویه", "حساب", "نوع", "توضیحات"],
+        "columns": ["شناسه", "شخص", "مبلغ", "پرداخت‌شده", "سررسید",
+                    "تاریخ پرداخت/دریافت", "وضعیت", "تاریخ تسویه", "حساب",
+                    "نوع", "توضیحات"],
         "numeric_idx": {2, 3},
         "build": _b_debts,
         "total": _t_debts,
-        "widths": [0.07, 0.11, 0.12, 0.12, 0.10, 0.09, 0.10, 0.11, 0.07, 0.11],
+        "widths": [0.06, 0.10, 0.11, 0.11, 0.09, 0.10, 0.08, 0.09, 0.10,
+                   0.06, 0.10],
     },
     "cost_income": {
         "title": "گزارش هزینه/درآمد",

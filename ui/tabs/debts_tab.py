@@ -393,6 +393,26 @@ class DebtsTab(QWidget):
         self.debt_due_date.setStyleSheet(
             "QLineEdit { color: #166534; font-weight: bold; }")
 
+        # نسخه ۲.۵ — تاریخ واقعی رد و بدل پول (مستقل از تاریخ سررسید):
+        # تراکنش مرتبط با همین تاریخ ثبت می‌شود.
+        self.debt_payment_date = QLineEdit(
+            gregorian_to_shamsi(today.strftime("%Y-%m-%d")))
+        self.debt_payment_date.setPlaceholderText("1404/02/13")
+        self.debt_payment_date.setReadOnly(True)
+        self.debt_payment_date.setEnabled(False)
+        self.debt_payment_date.mousePressEvent = \
+            lambda event: self._popup_calendar(self.debt_payment_date)
+        self.debt_payment_date.setStyleSheet(
+            "QLineEdit { color: #166534; font-weight: bold; }")
+
+        self.debt_payment_date_hint = QLabel(
+            "💡 تاریخ واقعی واریز/برداشت به حساب (پیش‌فرض: امروز). "
+            "تراکنش مرتبط با همین تاریخ ثبت می‌شود.")
+        self.debt_payment_date_hint.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: 12px; font-weight: normal;")
+        self.debt_payment_date_hint.setWordWrap(True)
+        self.debt_payment_date_hint.setEnabled(False)
+
         self.debt_show_in_dashboard = QCheckBox("نمایش در داشبورد")
         self.debt_description = QLineEdit()
         self.debt_description.setPlaceholderText("توضیح اختیاری...")
@@ -402,6 +422,8 @@ class DebtsTab(QWidget):
         form.addRow("نوع:", self.debt_is_credit)
         form.addRow("", self.debt_has_payment)
         form.addRow("حساب مرتبط:", self.debt_account)
+        form.addRow("تاریخ پرداخت/دریافت (شمسی):", self.debt_payment_date)
+        form.addRow("", self.debt_payment_date_hint)
         form.addRow("تاریخ سررسید (شمسی):", self.debt_due_date)
         form.addRow("", self.debt_show_in_dashboard)
         form.addRow("توضیحات:", self.debt_description)
@@ -632,11 +654,12 @@ class DebtsTab(QWidget):
         # ستون‌های کم‌اهمیت‌تر (حساب/توضیحات) زیر اسکرول افقی بروند.
         self.debts_table = QTableWidget()
         self.debts_table.setObjectName("debtsTable")
-        self.debts_table.setColumnCount(11)
+        self.debts_table.setColumnCount(12)
         self.debts_table.setHorizontalHeaderLabels(
             ["عملیات", "نوع", "شخص", "مبلغ", "پرداخت", "باقی‌مانده",
-             "سررسید", "وضعیت", "تاریخ تسویه", "حساب", "توضیحات"])
-        self._style_table(self.debts_table, stretch_column=10)
+             "سررسید", "تاریخ پرداخت/دریافت", "وضعیت", "تاریخ تسویه",
+             "حساب", "توضیحات"])
+        self._style_table(self.debts_table, stretch_column=11)
         # عرض ثابت برای ستون عملیات (ResizeToContents عرض ویجت‌های سلول را
         # محاسبه نمی‌کند؛ بدون این کار دکمه‌ها فشرده می‌شوند)
         self.debts_table.horizontalHeader().setSectionResizeMode(
@@ -768,8 +791,12 @@ class DebtsTab(QWidget):
         popup.exec()
 
     def _toggle_account_field(self, state):
-        """فعال/غیرفعال کردن لیست حساب‌ها بر اساس وضعیت چک‌باکس."""
-        self.debt_account.setEnabled(state == Qt.CheckState.Checked.value)
+        """فعال/غیرفعال کردن حساب و تاریخ رد و بدل پول بر اساس چک‌باکس."""
+        checked = state == Qt.CheckState.Checked.value
+        self.debt_account.setEnabled(checked)
+        # نسخه ۲.۵ — تاریخ پرداخت/دریافت فقط وقتی پولی رد و بدل شده معنا دارد
+        self.debt_payment_date.setEnabled(checked)
+        self.debt_payment_date_hint.setEnabled(checked)
 
     def _clear_search_dates(self):
         """پاک کردن تاریخ‌های فرم گزارش (گزارش کلی)."""
@@ -1055,7 +1082,7 @@ class DebtsTab(QWidget):
             self.db_manager.execute(
                 f"SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, "
                 f"d.is_paid, a.name, d.is_credit, d.description, d.person_id, "
-                f"d.settled_date "
+                f"d.settled_date, d.payment_date "
                 f"FROM debts d "
                 f"LEFT JOIN persons p ON d.person_id = p.id "
                 f"LEFT JOIN accounts a ON d.account_id = a.id "
@@ -1089,7 +1116,7 @@ class DebtsTab(QWidget):
             self.debts_table.setRowCount(len(debts))
             for row, (id, person, amount, paid, due_date, is_paid,
                       account, is_credit, description, person_id,
-                      settled_date) in enumerate(debts):
+                      settled_date, payment_date) in enumerate(debts):
                 is_credit = int(is_credit or 0)
                 remaining = (amount or 0) - (paid or 0)
                 self._row_person_ids[row] = person_id
@@ -1148,6 +1175,18 @@ class DebtsTab(QWidget):
                 if due_tip:
                     due_item.setToolTip(due_tip)
 
+                # ستون تاریخ پرداخت/دریافت (تاریخ واقعی رد و بدل پول هنگام
+                # ثبت — نسخه ۲.۵)؛ موارد قدیمی و بدون انتقال پول «—» هستند
+                payment_date_item = QTableWidgetItem(
+                    gregorian_to_shamsi(payment_date) if payment_date else "—")
+                payment_date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                payment_date_item.setForeground(
+                    QColor(TEXT_DARK) if payment_date else QColor(TEXT_MUTED))
+                payment_date_item.setBackground(row_bg)
+                if payment_date:
+                    payment_date_item.setToolTip(
+                        "تاریخ واقعی واریز/برداشت پول به/از حساب")
+
                 # ستون وضعیت
                 if is_paid:
                     status_text, status_color = "تسویه‌شده", QColor(TEXT_MUTED)
@@ -1186,7 +1225,8 @@ class DebtsTab(QWidget):
 
                 for column, item in enumerate([
                         type_item, person_item, amount_item, paid_item,
-                        remaining_item, due_item, status_item, settled_item,
+                        remaining_item, due_item, payment_date_item,
+                        status_item, settled_item,
                         account_item, desc_item], start=1):
                     self.debts_table.setItem(row, column, item)
 
@@ -1280,6 +1320,7 @@ class DebtsTab(QWidget):
         has_payment = self.debt_has_payment.isChecked()
         show_in_dashboard = self.debt_show_in_dashboard.isChecked()
         description = self.debt_description.text() or None
+        shamsi_payment_date = self.debt_payment_date.text().strip()
 
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
@@ -1299,20 +1340,53 @@ class DebtsTab(QWidget):
                 QMessageBox.warning(self, "خطا", "تاریخ نامعتبر است!")
                 return
 
+        # نسخه ۲.۵ — تاریخ واقعی رد و بدل پول (فقط هنگام فعال بودن تیک پرداخت)
+        payment_date = None
+        if has_payment:
+            if shamsi_payment_date:
+                if not is_valid_shamsi_date(shamsi_payment_date):
+                    QMessageBox.warning(
+                        self, "خطا",
+                        "فرمت تاریخ پرداخت/دریافت باید به صورت 1404/02/19 باشد!")
+                    return
+                try:
+                    payment_date = shamsi_to_gregorian(shamsi_payment_date)
+                except ValueError:
+                    payment_date = None
+                if not payment_date:
+                    QMessageBox.warning(
+                        self, "خطا", "تاریخ پرداخت/دریافت نامعتبر است!")
+                    return
+            else:
+                payment_date = datetime.now().strftime("%Y-%m-%d")
+
         try:
+            # بررسی موجودی برای طلب (خروج پول از حساب) — هماهنگ با ویرایش/تسویه
+            if has_payment and account_id and is_credit:
+                self.db_manager.execute(
+                    "SELECT balance FROM accounts WHERE id = ?", (account_id,))
+                acc_row = self.db_manager.fetchone()
+                if acc_row and acc_row[0] < amount:
+                    QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
+                    return
+
             # اگر پولی رد و بدل نشده، حسابی ذخیره نمی‌شود
             account_id_to_save = account_id if has_payment else None
 
             self.db_manager.execute(
                 "INSERT INTO debts (person_id, amount, due_date, is_paid, "
-                "account_id, show_in_dashboard, is_credit, description) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "account_id, show_in_dashboard, is_credit, description, "
+                "payment_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (person_id, amount, due_date, 0, account_id_to_save,
                  1 if show_in_dashboard else 0, 1 if is_credit else 0,
-                 description)
+                 description, payment_date)
             )
+            debt_id = self.db_manager.cursor.lastrowid
 
-            # اگر تیک پرداخت فعال باشد، موجودی حساب به‌روزرسانی می‌شود
+            # اگر تیک پرداخت فعال باشد، موجودی حساب به‌روزرسانی و تراکنش
+            # مرتبط ثبت می‌شود (نسخه ۲.۵ — پیش از این فقط موجودی تغییر
+            # می‌کرد و هیچ ردی در تب تراکنش‌ها باقی نمی‌ماند)
             if has_payment and account_id:
                 if is_credit:  # طلب من: من به کسی پول دادم، موجودی کم می‌شود
                     self.db_manager.execute(
@@ -1323,25 +1397,80 @@ class DebtsTab(QWidget):
                         "UPDATE accounts SET balance = balance + ? WHERE id = ?",
                         (amount, account_id))
 
+                # ثبت تراکنش مرتبط با تاریخ واقعی رد و بدل پول
+                category_name = "قرض دادن" if is_credit else "قرض گرفتن"
+                category_type = "expense" if is_credit else "income"
+                self.db_manager.execute(
+                    "SELECT id FROM categories WHERE name = ? AND type = ?",
+                    (category_name, category_type))
+                category_row = self.db_manager.fetchone()
+                if not category_row:
+                    QMessageBox.critical(
+                        self, "خطا",
+                        f"خطای سیستمی: دسته‌بندی '{category_name}' یافت نشد. "
+                        "لطفاً برنامه را مجدداً راه‌اندازی کنید یا با پشتیبانی "
+                        "تماس بگیرید.")
+                    self.db_manager.rollback()
+                    return
+                category_id = category_row[0]
+
+                person_name = "-"
+                if person_id:
+                    self.db_manager.execute(
+                        "SELECT name FROM persons WHERE id = ?", (person_id,))
+                    person_row = self.db_manager.fetchone()
+                    if person_row:
+                        person_name = person_row[0]
+
+                txn_description = (
+                    f"{'قرض دادن' if is_credit else 'قرض گرفتن'} "
+                    f"{format_amount(amount)} ریال "
+                    f"{'به' if is_credit else 'از'} {person_name} "
+                    f"(ثبت {'طلب' if is_credit else 'بدهی'})")
+                self.db_manager.execute(
+                    "INSERT INTO transactions (account_id, person_id, "
+                    "category_id, amount, date, description, debt_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (account_id, person_id, category_id, amount,
+                     payment_date, txn_description, debt_id))
+                reg_transaction_id = self.db_manager.cursor.lastrowid
+
+                # نگهداری شناسه تراکنش برای ویرایش/حذف صحیح در آینده
+                self.db_manager.execute(
+                    "UPDATE debts SET reg_transaction_id = ? WHERE id = ?",
+                    (reg_transaction_id, debt_id))
+
             self.db_manager.commit()
             self.debt_amount.clear()
             self.debt_due_date.setText(
                 gregorian_to_shamsi(datetime.now().date().strftime("%Y-%m-%d")))
             self.debt_has_payment.setChecked(False)
+            self.debt_payment_date.setText(
+                gregorian_to_shamsi(datetime.now().date().strftime("%Y-%m-%d")))
             self.debt_show_in_dashboard.setChecked(False)
             self.debt_description.clear()
             self.load_debts()
             # اطلاع‌رسانی به پنجره اصلی برای به‌روزرسانی حساب‌ها و داشبورد
             self.data_changed.emit()
-            QMessageBox.information(self, "موفق", "بدهی/طلب با موفقیت ثبت شد!")
+            if has_payment and account_id:
+                QMessageBox.information(
+                    self, "موفق",
+                    "بدهی/طلب با موفقیت ثبت شد!\n"
+                    f"یک تراکنش «{category_name}» نیز در تاریخ "
+                    f"{gregorian_to_shamsi(payment_date)} در تب تراکنش‌ها ثبت شد.")
+            else:
+                QMessageBox.information(
+                    self, "موفق", "بدهی/طلب با موفقیت ثبت شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            self.db_manager.rollback()
 
     def edit_debt(self, debt_id):
         try:
             self.db_manager.execute(
                 "SELECT person_id, amount, account_id, due_date, is_paid, "
-                "show_in_dashboard, description, is_credit FROM debts WHERE id = ?",
+                "show_in_dashboard, description, is_credit, payment_date "
+                "FROM debts WHERE id = ?",
                 (debt_id,)
             )
             debt = self.db_manager.fetchone()
@@ -1349,7 +1478,7 @@ class DebtsTab(QWidget):
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 return
             (person_id, amount, account_id, due_date, is_paid,
-             show_in_dashboard, description, is_credit) = debt
+             show_in_dashboard, description, is_credit, payment_date) = debt
             is_credit = int(is_credit or 0)
 
             dialog = QDialog(self)
@@ -1398,8 +1527,8 @@ class DebtsTab(QWidget):
             edit_has_payment = QCheckBox("آیا پولی دریافت/پرداخت شده؟")
             edit_has_payment.setChecked(bool(account_id))
             edit_has_payment.stateChanged.connect(
-                lambda state: edit_account.setEnabled(
-                    state == Qt.CheckState.Checked.value))
+                lambda state: self._toggle_edit_payment_fields(
+                    state, edit_account, edit_payment_date))
 
             edit_due_date = QLineEdit(
                 gregorian_to_shamsi(due_date) if due_date else "")
@@ -1407,6 +1536,20 @@ class DebtsTab(QWidget):
             edit_due_date.setPlaceholderText("1404/02/13")
             edit_due_date.mousePressEvent = \
                 lambda event: self._popup_calendar(edit_due_date)
+
+            # نسخه ۲.۵ — تاریخ واقعی رد و بدل پول (پیش‌فرض: مقدار ذخیره‌شده
+            # یا امروز برای بدهی‌های قدیمی که تاریخی ندارند)
+            edit_payment_date = QLineEdit(
+                gregorian_to_shamsi(payment_date) if payment_date
+                else gregorian_to_shamsi(
+                    datetime.now().date().strftime("%Y-%m-%d")))
+            edit_payment_date.setReadOnly(True)
+            edit_payment_date.setPlaceholderText("1404/02/13")
+            edit_payment_date.mousePressEvent = \
+                lambda event: self._popup_calendar(edit_payment_date)
+            edit_payment_date.setStyleSheet(
+                "QLineEdit { color: #166534; font-weight: bold; }")
+            edit_payment_date.setEnabled(bool(account_id))
 
             edit_is_credit = QComboBox()
             edit_is_credit.addItems(["بدهی من", "طلب من"])
@@ -1427,13 +1570,15 @@ class DebtsTab(QWidget):
                 edit_account.currentData(), edit_due_date.text(),
                 edit_is_credit.currentText() == "طلب من",
                 edit_has_payment.isChecked(), edit_show_in_dashboard.isChecked(),
-                edit_description.text() or None, dialog
+                edit_description.text() or None,
+                edit_payment_date.text().strip(), dialog
             ))
 
             layout.addRow("شخص:", edit_person)
             layout.addRow("مبلغ:", edit_amount)
             layout.addRow("", edit_has_payment)
             layout.addRow("حساب مرتبط:", edit_account)
+            layout.addRow("تاریخ پرداخت/دریافت (شمسی):", edit_payment_date)
             layout.addRow("تاریخ سررسید (شمسی):", edit_due_date)
             layout.addRow("نوع:", edit_is_credit)
             layout.addRow("", edit_show_in_dashboard)
@@ -1445,9 +1590,17 @@ class DebtsTab(QWidget):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
+    @staticmethod
+    def _toggle_edit_payment_fields(state, account_combo, payment_date_edit):
+        """فعال/غیرفعال کردن حساب و تاریخ رد و بدل پول در دیالوگ ویرایش."""
+        checked = state == Qt.CheckState.Checked.value
+        account_combo.setEnabled(checked)
+        payment_date_edit.setEnabled(checked)
+
     def save_debt(self, debt_id, person_id, amount, account_id,
                   shamsi_due_date, is_credit, has_payment,
-                  show_in_dashboard, description, dialog):
+                  show_in_dashboard, description, shamsi_payment_date,
+                  dialog):
         if not amount:
             QMessageBox.warning(self, "خطا", "مبلغ نمی‌تواند خالی باشد!")
             return
@@ -1466,16 +1619,37 @@ class DebtsTab(QWidget):
                 QMessageBox.warning(self, "خطا", "مبلغ یا تاریخ نامعتبر است!")
                 return
 
+        # نسخه ۲.۵ — تاریخ واقعی رد و بدل پول (اعتبارسنجی)
+        payment_date = None
+        if has_payment:
+            if shamsi_payment_date:
+                if not is_valid_shamsi_date(shamsi_payment_date):
+                    QMessageBox.warning(
+                        dialog, "خطا",
+                        "فرمت تاریخ پرداخت/دریافت باید به صورت 1404/02/19 باشد!")
+                    return
+                try:
+                    payment_date = shamsi_to_gregorian(shamsi_payment_date)
+                except ValueError:
+                    payment_date = None
+                if not payment_date:
+                    QMessageBox.warning(
+                        dialog, "خطا", "تاریخ پرداخت/دریافت نامعتبر است!")
+                    return
+            else:
+                payment_date = datetime.now().strftime("%Y-%m-%d")
+
         try:
             # دریافت اطلاعات بدهی قبلی برای حذف اثر آن
             self.db_manager.execute(
-                "SELECT amount, account_id, is_credit FROM debts WHERE id = ?",
+                "SELECT amount, account_id, is_credit, reg_transaction_id "
+                "FROM debts WHERE id = ?",
                 (debt_id,))
             old_debt = self.db_manager.fetchone()
             if not old_debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 return
-            old_amount, old_account_id, old_is_credit = old_debt
+            old_amount, old_account_id, old_is_credit, old_reg_txn_id = old_debt
             old_is_credit = int(old_is_credit or 0)
 
             # اگر پولی رد و بدل نشده، حسابی ذخیره نمی‌شود
@@ -1489,10 +1663,39 @@ class DebtsTab(QWidget):
                     balance = self.db_manager.fetchone()[0]
                     if balance < amount:
                         QMessageBox.warning(self, "خطا", "موجودی حساب کافی نیست!")
+                        self.db_manager.rollback()
                         return
 
             # حذف اثر قبلی از حساب قبلی (به‌صورت متقارن)
-            if old_account_id:
+            # نسخه ۲.۵ — اگر تراکنش ثبتِ مرتبط وجود دارد، از طریق خود
+            # تراکنش معکوس می‌شود (و ردیفش حذف می‌شود تا با ثبت جدید
+            # جایگزین شود). بدهی‌های قدیمی (قبل از ۲.۵) تراکنشی نداشتند
+            # و مثل قبل به‌صورت دستی معکوس می‌شوند.
+            if old_reg_txn_id:
+                self.db_manager.execute(
+                    "SELECT t.account_id, t.amount, c.type "
+                    "FROM transactions t JOIN categories c "
+                    "ON t.category_id = c.id WHERE t.id = ?",
+                    (old_reg_txn_id,))
+                old_txn = self.db_manager.fetchone()
+                if old_txn:
+                    old_txn_account, old_txn_amount, old_txn_type = old_txn
+                    if old_txn_type == "income":
+                        self.db_manager.execute(
+                            "UPDATE accounts SET balance = balance - ? "
+                            "WHERE id = ?",
+                            (old_txn_amount, old_txn_account))
+                    else:
+                        self.db_manager.execute(
+                            "UPDATE accounts SET balance = balance + ? "
+                            "WHERE id = ?",
+                            (old_txn_amount, old_txn_account))
+                    self.db_manager.execute(
+                        "DELETE FROM transactions WHERE id = ?",
+                        (old_reg_txn_id,))
+                # اگر تراکنش یافت نشد یعنی کاربر آن را دستی از تب
+                # تراکنش‌ها حذف کرده و اثرش آنجا معکوس شده است.
+            elif old_account_id:
                 if old_is_credit:
                     # طلب قدیمی: موقع ثبت، پول از حساب کم شده بود
                     self.db_manager.execute(
@@ -1504,7 +1707,8 @@ class DebtsTab(QWidget):
                         "UPDATE accounts SET balance = balance - ? WHERE id = ?",
                         (old_amount, old_account_id))
 
-            # اعمال اثر جدید
+            # اعمال اثر جدید + ثبت تراکنش ثبتِ جدید (نسخه ۲.۵)
+            reg_transaction_id = None
             if has_payment and account_id:
                 if is_credit:  # طلب من: پول به شخص داده می‌شود
                     self.db_manager.execute(
@@ -1515,6 +1719,42 @@ class DebtsTab(QWidget):
                         "UPDATE accounts SET balance = balance + ? WHERE id = ?",
                         (amount, account_id))
 
+                category_name = "قرض دادن" if is_credit else "قرض گرفتن"
+                category_type = "expense" if is_credit else "income"
+                self.db_manager.execute(
+                    "SELECT id FROM categories WHERE name = ? AND type = ?",
+                    (category_name, category_type))
+                category_row = self.db_manager.fetchone()
+                if not category_row:
+                    QMessageBox.critical(
+                        self, "خطا",
+                        f"خطای سیستمی: دسته‌بندی '{category_name}' یافت نشد. "
+                        "لطفاً برنامه را مجدداً راه‌اندازی کنید.")
+                    self.db_manager.rollback()
+                    return
+                category_id = category_row[0]
+
+                person_name = "-"
+                if person_id:
+                    self.db_manager.execute(
+                        "SELECT name FROM persons WHERE id = ?", (person_id,))
+                    person_row = self.db_manager.fetchone()
+                    if person_row:
+                        person_name = person_row[0]
+
+                txn_description = (
+                    f"{'قرض دادن' if is_credit else 'قرض گرفتن'} "
+                    f"{format_amount(amount)} ریال "
+                    f"{'به' if is_credit else 'از'} {person_name} "
+                    f"(ثبت {'طلب' if is_credit else 'بدهی'})")
+                self.db_manager.execute(
+                    "INSERT INTO transactions (account_id, person_id, "
+                    "category_id, amount, date, description, debt_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (account_id, person_id, category_id, amount,
+                     payment_date, txn_description, debt_id))
+                reg_transaction_id = self.db_manager.cursor.lastrowid
+
             # ذخیره در دیتابیس
             # نکته: دکمه ویرایش فقط برای موارد «در جریان» نمایش داده می‌شود؛
             # با این حال settled_date برای اطمینان پاک می‌شود تا وضعیت
@@ -1522,26 +1762,38 @@ class DebtsTab(QWidget):
             self.db_manager.execute(
                 "UPDATE debts SET person_id = ?, amount = ?, account_id = ?, "
                 "due_date = ?, is_paid = 0, show_in_dashboard = ?, "
-                "description = ?, is_credit = ?, settled_date = NULL "
+                "description = ?, is_credit = ?, settled_date = NULL, "
+                "payment_date = ?, reg_transaction_id = ? "
                 "WHERE id = ?",
                 (person_id, amount, account_id_to_save, due_date,
                  1 if show_in_dashboard else 0, description,
-                 1 if is_credit else 0, debt_id)
+                 1 if is_credit else 0, payment_date, reg_transaction_id,
+                 debt_id)
             )
             self.db_manager.commit()
             self.load_debts()
             self.data_changed.emit()
             dialog.accept()
-            QMessageBox.information(self, "موفق", "بدهی/طلب با موفقیت ویرایش شد!")
+            if has_payment and account_id:
+                QMessageBox.information(
+                    self, "موفق",
+                    "بدهی/طلب با موفقیت ویرایش شد!\n"
+                    "تراکنش «قرض دادن/گرفتن» مرتبط نیز با اطلاعات جدید "
+                    "بازسازی شد.")
+            else:
+                QMessageBox.information(
+                    self, "موفق", "بدهی/طلب با موفقیت ویرایش شد!")
 
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+            self.db_manager.rollback()
 
     def delete_debt(self, debt_id):
         try:
             # دریافت اطلاعات بدهی برای معکوس کردن اثر آن
             self.db_manager.execute(
-                "SELECT account_id, amount, paid_amount, is_credit "
+                "SELECT account_id, amount, paid_amount, is_credit, "
+                "reg_transaction_id "
                 "FROM debts WHERE id = ?",
                 (debt_id,)
             )
@@ -1549,7 +1801,7 @@ class DebtsTab(QWidget):
             if not debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 return
-            account_id, amount, paid_amount, is_credit = debt
+            account_id, amount, paid_amount, is_credit, reg_transaction_id = debt
             is_credit = int(is_credit or 0)
 
             # تأیید حذف از کاربر
@@ -1562,8 +1814,36 @@ class DebtsTab(QWidget):
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
-            # معکوس کردن اثر خالص بدهی روی موجودی حساب
-            if account_id:
+            # نسخه ۲.۵ — ابتدا تراکنش‌های مرتبطِ قابل‌ردیابی (ثبت و تسویه‌های
+            # جدید) حذف و اثرشان معکوس می‌شود؛ حذف این تراکنش‌ها همان اثر
+            # خالص قبلی را برمی‌گرداند و سابقه‌های یتیم در تب تراکنش‌ها
+            # باقی نمی‌ماند.
+            self.db_manager.execute(
+                "SELECT t.id, t.account_id, t.amount, c.type "
+                "FROM transactions t JOIN categories c "
+                "ON t.category_id = c.id "
+                "WHERE t.debt_id = ?",
+                (debt_id,))
+            linked_txns = self.db_manager.fetchall()
+
+            if linked_txns:
+                for txn_id, txn_account, txn_amount, txn_type in linked_txns:
+                    if txn_type == "income":
+                        self.db_manager.execute(
+                            "UPDATE accounts SET balance = balance - ? "
+                            "WHERE id = ?",
+                            (txn_amount, txn_account))
+                    else:
+                        self.db_manager.execute(
+                            "UPDATE accounts SET balance = balance + ? "
+                            "WHERE id = ?",
+                            (txn_amount, txn_account))
+                    self.db_manager.execute(
+                        "DELETE FROM transactions WHERE id = ?", (txn_id,))
+            elif account_id and not reg_transaction_id:
+                # بدهی‌های قدیمی (قبل از نسخه ۲.۵) — مثل قبل، اثر خالص
+                # به‌صورت دستی معکوس می‌شود. (تسویه‌های قدیمی آن‌ها تراکنش
+                # بدون پیوند دارند و همان‌طور قبلی باقی می‌مانند.)
                 remaining_amount = (amount or 0) - (paid_amount or 0)
                 if is_credit:
                     # طلب: موقع ثبت پول کم شده بود → اثر خالص برگردانده می‌شود
@@ -1575,6 +1855,8 @@ class DebtsTab(QWidget):
                     self.db_manager.execute(
                         "UPDATE accounts SET balance = balance - ? WHERE id = ?",
                         (remaining_amount, account_id))
+            # اگر reg_transaction_id تنظیم شده ولی تراکنشی یافت نشد، یعنی
+            # کاربر قبلاً تراکنش‌ها را دستی حذف کرده و اثرشان معکوس شده است.
 
             # حذف بدهی/طلب از دیتابیس
             self.db_manager.execute(
@@ -1584,7 +1866,15 @@ class DebtsTab(QWidget):
             # به‌روزرسانی جدول و اطلاع به پنجره اصلی
             self.load_debts()
             self.data_changed.emit()
-            QMessageBox.information(self, "موفق", "بدهی/طلب با موفقیت حذف شد!")
+            if linked_txns:
+                QMessageBox.information(
+                    self, "موفق",
+                    "بدهی/طلب با موفقیت حذف شد!\n"
+                    f"{len(linked_txns)} تراکنش مرتبط آن نیز حذف و اثرش "
+                    "روی موجودی حساب برگردانده شد.")
+            else:
+                QMessageBox.information(
+                    self, "موفق", "بدهی/طلب با موفقیت حذف شد!")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
@@ -1804,9 +2094,9 @@ class DebtsTab(QWidget):
                                f"{'طلب' if is_credit else 'بدهی'} با شخص {person_name}")
                 self.db_manager.execute(
                     "INSERT INTO transactions (account_id, person_id, category_id, "
-                    "amount, date, description) VALUES (?, ?, ?, ?, ?, ?)",
+                    "amount, date, description, debt_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (account_id, person_id, category_id_from_db,
-                     payment_amount, today_gregorian, description))
+                     payment_amount, today_gregorian, description, debt_id))
 
             else:
                 payment_amount = remaining_amount
@@ -1891,8 +2181,8 @@ class DebtsTab(QWidget):
 
             query = (
                 "SELECT d.id, p.name, d.amount, d.paid_amount, d.due_date, "
-                "d.is_paid, COALESCE(a.name, '-'), d.is_credit, d.description, "
-                "d.settled_date "
+                "d.payment_date, d.is_paid, COALESCE(a.name, '-'), d.is_credit, "
+                "d.description, d.settled_date "
                 "FROM debts d "
                 "LEFT JOIN persons p ON d.person_id = p.id "
                 "LEFT JOIN accounts a ON d.account_id = a.id "
@@ -1919,7 +2209,7 @@ class DebtsTab(QWidget):
         """
         debt_total = credit_total = 0.0
         debt_count = credit_count = 0
-        for (_id, _person, amount, paid, _due, is_paid,
+        for (_id, _person, amount, paid, _due, _payment, is_paid,
              _account, is_credit, _desc, _settled) in results:
             if is_paid:
                 continue
@@ -1949,11 +2239,12 @@ class DebtsTab(QWidget):
         dialog.setLayout(layout)
 
         table = QTableWidget()
-        table.setColumnCount(10)
+        table.setColumnCount(11)
         table.setHorizontalHeaderLabels(
             ["شناسه", "شخص", "مبلغ", "پرداخت‌شده", "سررسید",
-             "وضعیت", "تاریخ تسویه", "حساب", "نوع", "توضیحات"])
-        self._style_table(table, stretch_column=9)
+             "تاریخ پرداخت/دریافت", "وضعیت", "تاریخ تسویه", "حساب", "نوع",
+             "توضیحات"])
+        self._style_table(table, stretch_column=10)
         table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: white; alternate-background-color: #f8fafc;
@@ -2096,9 +2387,9 @@ class DebtsTab(QWidget):
         end = start + self.debt_report_per_page
         page_results = self.debt_report_results[start:end]
         table.setRowCount(len(page_results))
-        for row, (id, person, amount, paid, due_date, is_paid,
-                  account, is_credit, description, settled_date) in \
-                enumerate(page_results):
+        for row, (id, person, amount, paid, due_date, payment_date,
+                  is_paid, account, is_credit, description,
+                  settled_date) in enumerate(page_results):
             is_credit = int(is_credit or 0)
             type_color = QColor(GREEN if is_credit else RED)
 
@@ -2123,6 +2414,12 @@ class DebtsTab(QWidget):
                 gregorian_to_shamsi(due_date) if due_date else "-")
             due_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             due_item.setForeground(QColor(SLATE))
+
+            # تاریخ پرداخت/دریافت (نسخه ۲.۵) — برای موارد قدیمی «—»
+            payment_date_item = QTableWidgetItem(
+                gregorian_to_shamsi(payment_date) if payment_date else "—")
+            payment_date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            payment_date_item.setForeground(QColor(TEXT_MUTED))
 
             if is_paid:
                 status_text, status_color = "تسویه‌شده", QColor(TEXT_MUTED)
@@ -2153,8 +2450,8 @@ class DebtsTab(QWidget):
 
             for column, item in enumerate([
                     id_item, person_item, amount_item, paid_item, due_item,
-                    status_item, settled_item, account_item, type_item,
-                    desc_item]):
+                    payment_date_item, status_item, settled_item, account_item,
+                    type_item, desc_item]):
                 table.setItem(row, column, item)
 
         # ---- ردیف «جمع کل» در انتهای صفحه آخر ----
@@ -2175,7 +2472,7 @@ class DebtsTab(QWidget):
             "", "جمع کل",
             format_amount(total_amount),
             format_amount(total_paid),
-            "",
+            "", "",
             f"{len(results)} مورد",
             "",
             "", "",
@@ -2188,7 +2485,7 @@ class DebtsTab(QWidget):
             item.setFont(font)
             item.setBackground(QColor(SOFT_SLATE))
             item.setForeground(QColor(TEXT_DARK))
-            if col in (2, 3, 5):
+            if col in (2, 3, 6):
                 item.setTextAlignment(
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             table.setItem(row, col, item)
