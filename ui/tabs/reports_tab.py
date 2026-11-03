@@ -698,23 +698,24 @@ class ReportsTab(QWidget):
                 return row[0] if row and row[0] is not None else 0
 
             where = ("WHERE " + " AND ".join(date_sql)) if date_sql else ""
+            # انتقال بین حساب‌ها نه درآمد است نه هزینه؛ از جمع‌ها کنار گذاشته می‌شود
             total_income = _scalar(
                 f"SELECT SUM(t.amount) FROM transactions t "
                 f"JOIN categories c ON t.category_id = c.id "
-                f"{where} AND c.type = 'income'"
+                f"{where} AND (c.type = 'income' AND COALESCE(t.is_transfer, 0) = 0)"
                 if date_sql else
                 f"SELECT SUM(t.amount) FROM transactions t "
                 f"JOIN categories c ON t.category_id = c.id "
-                f"WHERE c.type = 'income'",
+                f"WHERE (c.type = 'income' AND COALESCE(t.is_transfer, 0) = 0)",
                 date_params)
             total_expense = _scalar(
                 f"SELECT SUM(t.amount) FROM transactions t "
                 f"JOIN categories c ON t.category_id = c.id "
-                f"{where} AND c.type = 'expense'"
+                f"{where} AND (c.type = 'expense' AND COALESCE(t.is_transfer, 0) = 0)"
                 if date_sql else
                 f"SELECT SUM(t.amount) FROM transactions t "
                 f"JOIN categories c ON t.category_id = c.id "
-                f"WHERE c.type = 'expense'",
+                f"WHERE (c.type = 'expense' AND COALESCE(t.is_transfer, 0) = 0)",
                 date_params)
             tx_count = _scalar(
                 f"SELECT COUNT(*) FROM transactions t {where}",
@@ -790,7 +791,8 @@ class ReportsTab(QWidget):
         try:
             report_type = "expense" if type_combo.currentText() == "هزینه" else "income"
             date_clauses, date_params = self._date_clauses(start_g, end_g)
-            clauses = ["c.type = ?"] + date_clauses
+            # انتقال بین حساب‌ها در گزارش هزینه/درآمد واقعی نمی‌آید
+            clauses = ["c.type = ?", "COALESCE(t.is_transfer, 0) = 0"] + date_clauses
             params = [report_type] + date_params
 
             account_id = account_combo.currentData()
@@ -891,8 +893,10 @@ class ReportsTab(QWidget):
                     """
                     SELECT COUNT(*),
                         COALESCE(SUM(CASE WHEN c.type = 'expense'
+                                  AND COALESCE(t.is_transfer, 0) = 0
                                   THEN t.amount ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN c.type = 'income'
+                                  AND COALESCE(t.is_transfer, 0) = 0
                                   THEN t.amount ELSE 0 END), 0)
                     FROM transactions t
                     JOIN categories c ON t.category_id = c.id
@@ -1139,12 +1143,13 @@ class ReportsTab(QWidget):
             trans_type = type_combo.currentText()
             clauses, params = self._date_clauses(start_g, end_g)
 
+            # «برداشت/واریز»: تراکنش‌های واقعی؛ انتقال بین حساب‌ها کنار گذاشته می‌شود.
             if trans_type == "برداشت":
-                clauses.append("c.type = 'expense' AND c.name != 'انتقال بین حساب‌ها (خروج)'")
+                clauses.append("c.type = 'expense' AND COALESCE(t.is_transfer, 0) = 0")
             elif trans_type == "واریز":
-                clauses.append("c.type = 'income' AND c.name != 'انتقال بین حساب‌ها (ورود)'")
+                clauses.append("c.type = 'income' AND COALESCE(t.is_transfer, 0) = 0")
             elif trans_type == "انتقال":
-                clauses.append("c.name IN ('انتقال بین حساب‌ها (ورود)', 'انتقال بین حساب‌ها (خروج)')")
+                clauses.append("COALESCE(t.is_transfer, 0) = 1")
 
             person_id = person_combo.currentData()
             if person_id:
@@ -1154,7 +1159,8 @@ class ReportsTab(QWidget):
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
             query = f"""
                 SELECT t.id, t.date, a.name, p.name, c.name,
-                       t.amount, t.description, c.type
+                       t.amount, t.description, c.type,
+                       COALESCE(t.is_transfer, 0)
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.id
                 LEFT JOIN persons p ON t.person_id = p.id
@@ -1165,19 +1171,33 @@ class ReportsTab(QWidget):
             self.db_manager.execute(query, params)
             results = self.db_manager.fetchall()
 
-            income = sum(r[5] or 0 for r in results if r[7] == "income")
-            expense = sum(r[5] or 0 for r in results if r[7] != "income")
+            # انتقال بین حساب‌ها در جمع درآمد/هزینه محاسبه نمی‌شود؛
+            # جمع انتقال فقط نیمهٔ «خروج» را می‌شمارد (مبلغ واقعی جابه‌جاشده)
+            income = sum(r[5] or 0 for r in results
+                         if r[7] == "income" and not r[8])
+            expense = sum(r[5] or 0 for r in results
+                          if r[7] != "income" and not r[8])
+            transfer = sum(r[5] or 0 for r in results
+                           if r[8] and r[7] != "income")
+
+            def _txn_type_label(r):
+                if r[8]:
+                    return "انتقال"
+                return "درآمد" if r[7] == "income" else "هزینه"
 
             display_rows = [
                 [str(r[0]), gregorian_to_shamsi(r[1]), r[2] or "-",
                  r[3] or "-", r[4] or "-", format_amount(r[5]),
-                 r[6] or "-", "درآمد" if r[7] == "income" else "هزینه"]
+                 r[6] or "-", _txn_type_label(r)]
                 for r in results
             ]
+            summary_text = (f"جمع درآمد: {format_amount(income)} | "
+                            f"جمع هزینه: {format_amount(expense)}")
+            if transfer:
+                summary_text += f" | جمع انتقال: {format_amount(transfer)}"
             total_row = ["", "جمع کل", "", "", "",
                          format_amount(income - expense),
-                         f"جمع درآمد: {format_amount(income)} | "
-                         f"جمع هزینه: {format_amount(expense)}", "خالص"]
+                         summary_text, "خالص"]
             dialog.accept()
 
             self._show_report_dialog(
@@ -1338,7 +1358,10 @@ class ReportsTab(QWidget):
         try:
             cat_type = "expense" if direction_combo.currentText() == "هزینه" else "income"
             clauses, params = self._date_clauses(start_g, end_g)
+            # دسته‌های «انتقال بین حساب‌ها» سیستمی‌اند و در سهم دسته‌های
+            # هزینه/درآمد واقعی نمایش داده نمی‌شوند.
             clauses.insert(0, "c.type = ?")
+            clauses.insert(1, "COALESCE(t.is_transfer, 0) = 0")
             params.insert(0, cat_type)
 
             query = f"""

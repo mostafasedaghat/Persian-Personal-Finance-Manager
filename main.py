@@ -242,6 +242,27 @@ class FinanceApp(QMainWindow):
                 self.db_manager.execute(
                     "ALTER TABLE transactions ADD COLUMN debt_id INTEGER")
 
+            # نسخه ۲.۶ — نشانه‌گذاری تراکنش‌های «انتقال بین حساب‌ها».
+            # انتقال پول بین حساب‌های خودِ کاربر، درآمد یا هزینه واقعی نیست؛
+            # با این ستون از جمع‌های درآمد/هزینه (داشبورد، گزارش‌ها و تب
+            # تراکنش‌ها) کنار گذاشته می‌شود و به‌عنوان «انتقال» نمایش داده می‌شود.
+            if "is_transfer" not in txn_columns:
+                self.db_manager.execute(
+                    "ALTER TABLE transactions ADD COLUMN is_transfer INTEGER DEFAULT 0")
+            # بازنشانی ردیف‌های قدیمی بر اساس دسته‌بندی انتقال.
+            # این دستور همیشه اجرا می‌شود؛ idempotent است و فقط ردیف‌هایی را
+            # نشانه‌گذاری می‌کند که دسته‌بندی انتقال دارند (با ویرایش کاربر
+            # تداخل ندارد؛ چون شرط بر دسته‌بندی فعلی ردیف است).
+            self.db_manager.execute(
+                """
+                UPDATE transactions SET is_transfer = 1
+                WHERE category_id IN (
+                    SELECT id FROM categories
+                    WHERE name IN ('انتقال بین حساب‌ها (خروج)',
+                                   'انتقال بین حساب‌ها (ورود)'))
+                """
+            )
+
             # به‌روزرسانی جدول loans برای حذف end_date و افزودن installment_amount و installment_interval
             self.db_manager.execute("PRAGMA table_info(loans)")
             loan_columns = [col[1] for col in self.db_manager.fetchall()]

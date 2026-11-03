@@ -717,7 +717,8 @@ class DashboardTab(QWidget):
         try:
             # واکشی ۵۰ تراکنش آخر (جدیدترین‌ها در بالا)
             self.db_manager.execute(
-                "SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type "
+                "SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type, "
+                "COALESCE(t.is_transfer, 0) "
                 "FROM transactions t "
                 "JOIN accounts a ON t.account_id = a.id "
                 "LEFT JOIN persons p ON t.person_id = p.id "
@@ -742,10 +743,15 @@ class DashboardTab(QWidget):
                 self.recent_transactions_table.setRowCount(
                     min(len(recent_transactions), self.recent_per_page))
                 for row, (id, date, account, person, category, amount,
-                          desc, category_type) in enumerate(recent_transactions):
+                          desc, category_type, is_transfer) in enumerate(recent_transactions):
                     shamsi_date = gregorian_to_shamsi(date) if date else "-"
-                    is_income = (category_type == "income")
-                    type_color = QColor(GREEN if is_income else RED)
+                    # انتقال بین حساب‌ها: نه درآمد است نه هزینه؛ رنگ خنثی
+                    if is_transfer:
+                        type_text, type_color = "انتقال", QColor(SLATE)
+                    else:
+                        is_income = (category_type == "income")
+                        type_text = "درآمد" if is_income else "هزینه"
+                        type_color = QColor(GREEN if is_income else RED)
 
                     date_item = QTableWidgetItem(shamsi_date)
                     date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -769,8 +775,7 @@ class DashboardTab(QWidget):
                     if desc:
                         desc_item.setToolTip(str(desc))
 
-                    type_item = QTableWidgetItem(
-                        "درآمد" if is_income else "هزینه")
+                    type_item = QTableWidgetItem(type_text)
                     type_font = type_item.font()
                     type_font.setBold(True)
                     type_item.setFont(type_font)
@@ -808,7 +813,8 @@ class DashboardTab(QWidget):
             SELECT COALESCE(SUM(t.amount), 0)
             FROM transactions t
             JOIN categories c ON t.category_id = c.id
-            WHERE c.type = 'expense' AND t.date BETWEEN ? AND ?
+            WHERE c.type = 'expense' AND COALESCE(t.is_transfer, 0) = 0
+              AND t.date BETWEEN ? AND ?
             """,
             (start_str, end_str)
         )
@@ -821,7 +827,8 @@ class DashboardTab(QWidget):
             SELECT COALESCE(SUM(t.amount), 0)
             FROM transactions t
             JOIN categories c ON t.category_id = c.id
-            WHERE c.type = 'income' AND t.date BETWEEN ? AND ?
+            WHERE c.type = 'income' AND COALESCE(t.is_transfer, 0) = 0
+              AND t.date BETWEEN ? AND ?
             """,
             (start_str, end_str)
         )

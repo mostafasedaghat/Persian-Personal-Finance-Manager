@@ -86,21 +86,36 @@ def _parse_formatted(text):
 # ------------------------------------------------------------------ #
 def _b_transactions(raw):
     rows = []
-    for (tid, date, account, person, category, amount, desc, cat_type) in raw:
+    for (tid, date, account, person, category, amount, desc, cat_type,
+         is_transfer) in raw:
+        # انتقال بین حساب‌ها: نه درآمد است نه هزینه
+        if is_transfer:
+            type_label = "انتقال"
+        else:
+            type_label = "درآمد" if cat_type == "income" else "هزینه"
         rows.append([
             str(tid), gregorian_to_shamsi(date), account or "-", person or "-",
-            category or "-", _num(amount), desc or "-",
-            "درآمد" if cat_type == "income" else "هزینه",
+            category or "-", _num(amount), desc or "-", type_label,
         ])
     return rows
 
 
 def _t_transactions(raw):
-    income = sum(_num(r[5]) for r in raw if r[7] == "income")
-    expense = sum(_num(r[5]) for r in raw if r[7] != "income")
+    # انتقال بین حساب‌ها در جمع درآمد/هزینه محاسبه نمی‌شود؛
+    # جمع انتقال فقط نیمهٔ «خروج» را می‌شمارد (مبلغ واقعی جابه‌جاشده)
+    income = sum(_num(r[5]) for r in raw
+                 if r[7] == "income" and not r[8])
+    expense = sum(_num(r[5]) for r in raw
+                  if r[7] != "income" and not r[8])
+    transfer = sum(_num(r[5]) for r in raw
+                   if r[8] and r[7] != "income")
+    summary = (f"جمع درآمد: {format_amount(income)} | "
+               f"جمع هزینه: {format_amount(expense)}")
+    if transfer:
+        summary += f" | جمع انتقال: {format_amount(transfer)}"
     return [
         "", TOTAL_LABEL, "", "", "", _num(income - expense),
-        f"جمع درآمد: {format_amount(income)} | جمع هزینه: {format_amount(expense)}",
+        summary,
         "خالص",
     ]
 

@@ -562,7 +562,8 @@ class TransactionsTab(QWidget):
         type_label = QLabel("نوع تراکنش:")
         type_label.setObjectName("formLabel")
         self.filter_type = QComboBox()
-        self.filter_type.addItems(["همه", "هزینه", "درآمد"])
+        # «انتقال»: جابه‌جایی پول بین حساب‌های خود کاربر؛ نه درآمد است نه هزینه
+        self.filter_type.addItems(["همه", "هزینه", "درآمد", "انتقال"])
         self.filter_type.currentIndexChanged.connect(
             lambda _: self.apply_filters())
         type_box.addWidget(type_label)
@@ -754,8 +755,12 @@ class TransactionsTab(QWidget):
             "income" if self.transaction_type.currentText() == "درآمد" else "expense"
         self.transaction_category.clear()
         try:
+            # دسته‌های «انتقال بین حساب‌ها» سیستمی هستند و فقط از فرم
+            # «انتقال پول» استفاده می‌شوند؛ در ثبت تراکنش معمولی نمایش داده نمی‌شوند.
             self.db_manager.execute(
-                "SELECT id, name FROM categories WHERE type = ?",
+                "SELECT id, name FROM categories WHERE type = ? "
+                "AND name NOT IN ('انتقال بین حساب‌ها (خروج)', "
+                "'انتقال بین حساب‌ها (ورود)')",
                 (category_type,))
             categories = self.db_manager.fetchall()
             for cat_id, name in categories:
@@ -781,12 +786,16 @@ class TransactionsTab(QWidget):
             clauses.append("t.account_id = ?")
             params.append(account_id)
 
-        # فیلتر نوع (هزینه/درآمد)
+        # فیلتر نوع (هزینه/درآمد/انتقال)
+        # تراکنش‌های «انتقال بین حساب‌ها» درآمد/هزینه واقعی نیستند؛
+        # هنگام فیلتر هزینه یا درآمد کنار گذاشته می‌شوند.
         filter_type = self.filter_type.currentText()
         if filter_type == "هزینه":
-            clauses.append("c.type = 'expense'")
+            clauses.append("c.type = 'expense' AND COALESCE(t.is_transfer, 0) = 0")
         elif filter_type == "درآمد":
-            clauses.append("c.type = 'income'")
+            clauses.append("c.type = 'income' AND COALESCE(t.is_transfer, 0) = 0")
+        elif filter_type == "انتقال":
+            clauses.append("COALESCE(t.is_transfer, 0) = 1")
 
         # فیلتر بازه تاریخ (شمسی → میلادی)
         start_text = self.filter_start_date.text().strip()
@@ -867,7 +876,7 @@ class TransactionsTab(QWidget):
             offset = (self.transactions_current_page - 1) * self.transactions_per_page
             self.db_manager.execute(
                 f"SELECT t.id, t.date, a.name, p.name, c.name, "
-                f"t.amount, t.description, c.type "
+                f"t.amount, t.description, c.type, COALESCE(t.is_transfer, 0) "
                 f"FROM transactions t "
                 f"JOIN accounts a ON t.account_id = a.id "
                 f"LEFT JOIN persons p ON t.person_id = p.id "
@@ -894,12 +903,16 @@ class TransactionsTab(QWidget):
 
             self.transactions_table.setRowCount(len(transactions))
             for row, (id, date, account, person, category, amount,
-                       desc, category_type) in enumerate(transactions):
-                is_income = (category_type == "income")
-                type_color = QColor(GREEN if is_income else RED)
-
-                date_item = QTableWidgetItem(
-                    gregorian_to_shamsi(date) if date else "-")
+                       desc, category_type, is_transfer) in enumerate(transactions):
+                shamsi_date = gregorian_to_shamsi(date) if date else "-"
+                # انتقال بین حساب‌ها: نه درآمد است نه هزینه؛ با رنگ خنثی نمایش داده می‌شود
+                if is_transfer:
+                    type_text, type_color = "انتقال", QColor(SLATE)
+                else:
+                    is_income = (category_type == "income")
+                    type_text = "درآمد" if is_income else "هزینه"
+                    type_color = QColor(GREEN if is_income else RED)
+                date_item = QTableWidgetItem(shamsi_date)
                 date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 date_item.setForeground(QColor(SLATE))
 
@@ -926,7 +939,7 @@ class TransactionsTab(QWidget):
                 if desc:
                     desc_item.setToolTip(str(desc))
 
-                type_item = QTableWidgetItem("درآمد" if is_income else "هزینه")
+                type_item = QTableWidgetItem(type_text)
                 type_font = type_item.font()
                 type_font.setBold(True)
                 type_item.setFont(type_font)
@@ -1052,7 +1065,8 @@ class TransactionsTab(QWidget):
     def edit_transaction(self, transaction_id):
         try:
             self.db_manager.execute(
-                "SELECT t.account_id, t.person_id, t.category_id, t.amount, t.date, t.description, c.type "
+                "SELECT t.account_id, t.person_id, t.category_id, t.amount, t.date, t.description, c.type, "
+                "COALESCE(t.is_transfer, 0) "
                 "FROM transactions t JOIN categories c ON t.category_id = c.id WHERE t.id = ?",
                 (transaction_id,)
             )
@@ -1060,7 +1074,8 @@ class TransactionsTab(QWidget):
             if not transaction:
                 QMessageBox.warning(self, "خطا", "تراکنش یافت نشد!")
                 return
-            account_id, person_id, category_id, amount, date, desc, category_type = transaction
+            (account_id, person_id, category_id, amount, date, desc,
+             category_type, is_transfer) = transaction
 
             dialog = QDialog(self)
             dialog.setWindowTitle("ویرایش تراکنش")
@@ -1077,6 +1092,17 @@ class TransactionsTab(QWidget):
             layout = QFormLayout(dialog)
             layout.setContentsMargins(18, 18, 18, 18)
             layout.setSpacing(9)
+
+            # هشدار برای تراکنش‌های انتقال: ماهیت آن‌ها به دسته‌بندی انتخاب‌شده وابسته است
+            if is_transfer:
+                warn_label = QLabel(
+                    "🔁 این تراکنش بخشی از یک «انتقال بین حساب‌ها» است و در جمع "
+                    "درآمد/هزینه محاسبه نمی‌شود. اگر دسته‌بندی را به دستهٔ عادی "
+                    "تغییر دهید، به تراکنش معمولی (درآمد/هزینه) تبدیل می‌شود.")
+                warn_label.setWordWrap(True)
+                warn_label.setStyleSheet(
+                    "color: #b45309; font-size: 12px; font-weight: bold;")
+                layout.addRow(warn_label)
 
             edit_account = QComboBox()
             self.db_manager.execute("SELECT id, name, balance FROM accounts")
@@ -1112,9 +1138,18 @@ class TransactionsTab(QWidget):
                 edit_category.clear()
                 current_type = \
                     "income" if edit_type.currentText() == "درآمد" else "expense"
-                self.db_manager.execute(
-                    "SELECT id, name FROM categories WHERE type = ?",
-                    (current_type,))
+                if is_transfer:
+                    # برای تراکنش انتقال، دسته‌های سیستمی انتقال هم قابل انتخاب‌اند
+                    # (تا کاربر بتواند ماهیت انتقال را حفظ یا تغییر دهد)
+                    self.db_manager.execute(
+                        "SELECT id, name FROM categories WHERE type = ?",
+                        (current_type,))
+                else:
+                    self.db_manager.execute(
+                        "SELECT id, name FROM categories WHERE type = ? "
+                        "AND name NOT IN ('انتقال بین حساب‌ها (خروج)', "
+                        "'انتقال بین حساب‌ها (ورود)')",
+                        (current_type,))
                 categories = self.db_manager.fetchall()
                 for cat_id, name in categories:
                     edit_category.addItem(name, cat_id)
@@ -1202,9 +1237,19 @@ class TransactionsTab(QWidget):
                     (amount, account_id))
 
             # بروزرسانی در دیتابیس
+            # ماهیت «انتقال» بر اساس دسته‌بندی انتخاب‌شده تعیین می‌شود:
+            # دسته‌های سیستمی انتقال ⟺ تراکنش انتقال (در جمع درآمد/هزینه نمی‌آید)
             self.db_manager.execute(
-                "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, amount = ?, date = ?, description = ? WHERE id = ?",
-                (account_id, person_id, category_id, amount, date, desc, transaction_id)
+                "SELECT COUNT(*) FROM categories WHERE id = ? AND name IN "
+                "('انتقال بین حساب‌ها (خروج)', 'انتقال بین حساب‌ها (ورود)')",
+                (category_id,))
+            new_is_transfer = 1 if self.db_manager.fetchone()[0] else 0
+
+            self.db_manager.execute(
+                "UPDATE transactions SET account_id = ?, person_id = ?, category_id = ?, "
+                "amount = ?, date = ?, description = ?, is_transfer = ? WHERE id = ?",
+                (account_id, person_id, category_id, amount, date, desc,
+                 new_is_transfer, transaction_id)
             )
 
             self.db_manager.commit()
@@ -1310,15 +1355,17 @@ class TransactionsTab(QWidget):
                 return
             income_category_id = income_category_id[0]
 
-            # ثبت تراکنش خروج
+            # ثبت تراکنش خروج (نشانه‌گذاری به‌عنوان انتقال؛ نه هزینه واقعی)
             self.db_manager.execute(
-                "INSERT INTO transactions (account_id, category_id, amount, date, description) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO transactions (account_id, category_id, amount, date, description, is_transfer) "
+                "VALUES (?, ?, ?, ?, ?, 1)",
                 (from_account_id, expense_category_id, amount, date, "انتقال به حساب دیگر")
             )
 
-            # ثبت تراکنش ورود
+            # ثبت تراکنش ورود (نشانه‌گذاری به‌عنوان انتقال؛ نه درآمد واقعی)
             self.db_manager.execute(
-                "INSERT INTO transactions (account_id, category_id, amount, date, description) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO transactions (account_id, category_id, amount, date, description, is_transfer) "
+                "VALUES (?, ?, ?, ?, ?, 1)",
                 (to_account_id, income_category_id, amount, date, "دریافت از حساب دیگر")
             )
 
@@ -1392,19 +1439,21 @@ class TransactionsTab(QWidget):
                 return
 
             query = """
-                SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type
+                SELECT t.id, t.date, a.name, p.name, c.name, t.amount, t.description, c.type,
+                       COALESCE(t.is_transfer, 0)
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.id
                 LEFT JOIN persons p ON t.person_id = p.id
                 JOIN categories c ON t.category_id = c.id
             """
 
+            # «برداشت/واریز»: تراکنش‌های واقعی؛ انتقال بین حساب‌ها کنار گذاشته می‌شود.
             if trans_type == "برداشت":
-                clauses.append("c.type = 'expense' AND c.name != 'انتقال بین حساب‌ها (خروج)'")
+                clauses.append("c.type = 'expense' AND COALESCE(t.is_transfer, 0) = 0")
             elif trans_type == "واریز":
-                clauses.append("c.type = 'income' AND c.name != 'انتقال بین حساب‌ها (ورود)'")
+                clauses.append("c.type = 'income' AND COALESCE(t.is_transfer, 0) = 0")
             elif trans_type == "انتقال":
-                clauses.append("c.name IN ('انتقال بین حساب‌ها (ورود)', 'انتقال بین حساب‌ها (خروج)')")
+                clauses.append("COALESCE(t.is_transfer, 0) = 1")
 
             if person_id:
                 clauses.append("t.person_id = ?")
@@ -1519,9 +1568,15 @@ class TransactionsTab(QWidget):
         end = start + self.transaction_report_per_page
         page_results = self.transaction_report_results[start:end]
         table.setRowCount(len(page_results))
-        for row, (id, date, account, person, category, amount, desc, cat_type) in enumerate(page_results):
-            is_income = (cat_type == "income")
-            type_color = QColor(GREEN if is_income else RED)
+        for row, (id, date, account, person, category, amount, desc, cat_type,
+                  is_transfer) in enumerate(page_results):
+            # انتقال بین حساب‌ها: نه درآمد است نه هزینه
+            if is_transfer:
+                type_text, type_color = "انتقال", QColor(SLATE)
+            else:
+                is_income = (cat_type == "income")
+                type_text = "درآمد" if is_income else "هزینه"
+                type_color = QColor(GREEN if is_income else RED)
 
             id_item = QTableWidgetItem(str(id))
             id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1547,7 +1602,7 @@ class TransactionsTab(QWidget):
             desc_item = QTableWidgetItem(desc or "-")
             desc_item.setForeground(QColor(TEXT_MUTED))
 
-            type_item = QTableWidgetItem("درآمد" if is_income else "هزینه")
+            type_item = QTableWidgetItem(type_text)
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             type_item.setForeground(type_color)
 
@@ -1561,11 +1616,23 @@ class TransactionsTab(QWidget):
             self._append_report_totals_row(table)
 
     def _append_report_totals_row(self, table):
-        """افزودن ردیف جمع کل (درآمد/هزینه/خالص) به انتهای جدول گزارش."""
+        """افزودن ردیف جمع کل (درآمد/هزینه/انتقال) به انتهای جدول گزارش."""
         results = self.transaction_report_results
-        income = sum(r[5] or 0 for r in results if r[7] == "income")
-        expense = sum(r[5] or 0 for r in results if r[7] != "income")
+        # انتقال بین حساب‌ها در جمع درآمد/هزینه محاسبه نمی‌شود؛
+        # جمع انتقال فقط نیمهٔ «خروج» را می‌شمارد (مبلغ واقعی جابه‌جاشده)
+        # تا دو برابر نمایش داده نشود.
+        income = sum(r[5] or 0 for r in results
+                     if r[7] == "income" and not r[8])
+        expense = sum(r[5] or 0 for r in results
+                      if r[7] != "income" and not r[8])
+        transfer = sum(r[5] or 0 for r in results
+                       if r[8] and r[7] != "income")
         net = income - expense
+
+        summary_text = (f"جمع درآمد: {format_amount(income)} | "
+                        f"جمع هزینه: {format_amount(expense)}")
+        if transfer:
+            summary_text += f" | جمع انتقال: {format_amount(transfer)}"
 
         row = table.rowCount()
         table.insertRow(row)
@@ -1573,7 +1640,7 @@ class TransactionsTab(QWidget):
         cells = [
             "", "جمع کل", "", "", "",
             format_amount(net),
-            f"جمع درآمد: {format_amount(income)} | جمع هزینه: {format_amount(expense)}",
+            summary_text,
             "خالص",
         ]
         for col, text in enumerate(cells):
