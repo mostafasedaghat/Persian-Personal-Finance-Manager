@@ -283,7 +283,7 @@ class ReportsTab(QWidget):
              "بدهی‌ها و طلب‌ها با وضعیت تسویه و جمع باقی‌مانده",
              self.open_debts_report),
             ("🏷️", SOFT_GREEN, "گزارش دسته‌بندی‌ها",
-             "سهم هر دسته از هزینه‌ها یا درآمدها با درصد",
+             "سهم همه دسته‌ها یا ریز تراکنش‌های یک دستهٔ خاص",
              self.open_category_report),
             ("🏦", SOFT_SLATE, "گزارش حساب‌ها",
              "مانده و گردش حساب‌ها + جمع کل دارایی",
@@ -1337,26 +1337,75 @@ class ReportsTab(QWidget):
     # ================================================================== #
     # ۷) گزارش دسته‌بندی‌ها
     # ================================================================== #
+    def _reload_category_combo(self, combo, cat_type):
+        """پر کردن کمبوی «دسته‌بندی» بر اساس جهت (هزینه/درآمد).
+
+        گزینهٔ نخست «همه دسته‌ها» است تا کاربر بتواند گزارش کلی بگیرد؛
+        انتخاب هر دسته، گزارشِ ریز تراکنش‌های همان دسته را می‌سازد.
+        دسته‌های سیستمی «انتقال بین حساب‌ها» کنار گذاشته می‌شوند.
+        """
+        selected = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("همه دسته‌ها (گزارش کلی)", None)
+        try:
+            self.db_manager.execute(
+                "SELECT id, name FROM categories "
+                "WHERE type = ? AND name NOT IN ("
+                "'انتقال بین حساب\u200cها (خروج)', "
+                "'انتقال بین حساب\u200cها (ورود)') "
+                "ORDER BY name",
+                (cat_type,))
+            for cid, name in self.db_manager.fetchall():
+                combo.addItem(name, cid)
+        except sqlite3.Error:
+            pass
+        combo.blockSignals(False)
+        # بازگرداندن انتخاب قبلی (اگر همچنان در فهرست باشد)
+        if selected is not None:
+            idx = combo.findData(selected)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+
     def open_category_report(self):
         direction_combo = QComboBox()
         direction_combo.addItems(["هزینه", "درآمد"])
+        category_combo = QComboBox()
+        self._reload_category_combo(category_combo, "expense")
+
+        def _on_direction_changed(text):
+            # با تغییر جهت، فهرست دسته‌ها از نو ساخته می‌شود
+            cat_type = "expense" if text == "هزینه" else "income"
+            self._reload_category_combo(category_combo, cat_type)
+
+        direction_combo.currentTextChanged.connect(_on_direction_changed)
+
         start_edit = self._make_date_edit()
         end_edit = self._make_date_edit()
         self._open_param_dialog(
             "گزارش دسته‌بندی‌ها",
             [("جهت:", direction_combo),
+             ("دسته‌بندی:", category_combo),
              ("از تاریخ (شمسی):", start_edit),
              ("تا تاریخ (شمسی):", end_edit)],
             lambda dlg: self._generate_category(
-                dlg, direction_combo, start_edit, end_edit))
+                dlg, direction_combo, category_combo, start_edit, end_edit))
 
-    def _generate_category(self, dialog, direction_combo, start_edit, end_edit):
+    def _generate_category(self, dialog, direction_combo, category_combo,
+                           start_edit, end_edit):
         start_g, end_g, error = self._resolve_optional_dates(start_edit, end_edit)
         if error:
             QMessageBox.warning(self, "خطا", error)
             return
         try:
             cat_type = "expense" if direction_combo.currentText() == "هزینه" else "income"
+            category_id = category_combo.currentData()
+
+            if category_id:
+                self._generate_category_detail(
+                    dialog, category_combo, cat_type,
+                    start_edit, end_edit, start_g, end_g)
+                return
 
             # LEFT JOIN از جدول دسته‌ها: «همهٔ» دسته‌های آن جهت نمایش
             # داده می‌شوند — حتی دسته‌هایی که در بازهٔ انتخابی تراکنش
@@ -1438,6 +1487,79 @@ class ReportsTab(QWidget):
         except Exception as e:  # noqa: BLE001 - نمایش خطای غیرمنتظره
             QMessageBox.critical(
                 self, "خطا", f"خطا در تولید گزارش دسته‌بندی‌ها: {e}")
+
+    def _generate_category_detail(self, dialog, category_combo, cat_type,
+                                  start_edit, end_edit, start_g, end_g):
+        """ریز تراکنش‌های یک دستهٔ خاص (انتخاب‌شده از کمبوی گزارش).
+
+        ساختار مشابه «گزارش اشخاص» است: تاریخ، حساب، شخص، مبلغ،
+        توضیحات + KPI جمع مبلغ/تعداد/میانگین. خروجی‌ها با نوع
+        «category_detail» از موتور مشترک report_exporter ساخته می‌شوند.
+        """
+        try:
+            category_id = category_combo.currentData()
+            category_name = category_combo.currentText()
+
+            clauses = ["t.category_id = ?",
+                       "COALESCE(t.is_transfer, 0) = 0"]
+            params = [category_id]
+            if start_g:
+                clauses.append("t.date >= ?")
+                params.append(start_g)
+            if end_g:
+                clauses.append("t.date <= ?")
+                params.append(end_g)
+
+            query = f"""
+                SELECT t.date, a.name, p.name, t.amount, t.description
+                FROM transactions t
+                JOIN accounts a ON t.account_id = a.id
+                LEFT JOIN persons p ON t.person_id = p.id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY t.date DESC, t.id DESC
+            """
+            self.db_manager.execute(query, tuple(params))
+            results = self.db_manager.fetchall()
+
+            display_rows = [
+                [gregorian_to_shamsi(r[0]) if r[0] else "-",
+                 r[1] or "-", r[2] or "-", format_amount(r[3]),
+                 r[4] or "-"]
+                for r in results
+            ]
+            total = sum((r[3] or 0) for r in results)
+            count = len(results)
+            average = total / count if count else 0
+            direction_label = "هزینه" if cat_type == "expense" else "درآمد"
+            total_row = ["جمع کل", "", "", format_amount(total),
+                         f"{count} تراکنش"]
+            dialog.accept()
+
+            self._show_report_dialog(
+                title=f"گزارش تراکنش‌های دستهٔ «{category_name}»",
+                subtitle=(f"ریز {direction_label}‌های این دسته — "
+                          + self._dates_subtitle(start_edit, end_edit)),
+                columns=["تاریخ", "حساب", "شخص", "مبلغ", "توضیحات"],
+                rows=display_rows,
+                report_type="category_detail",
+                raw_data=results,
+                total_row=total_row,
+                kpis=[
+                    (f"جمع {direction_label}‌ها (ریال)",
+                     format_amount(total),
+                     RED if cat_type == "expense" else GREEN,
+                     SOFT_RED if cat_type == "expense" else SOFT_GREEN),
+                    ("تعداد تراکنش", format_amount(count),
+                     TEXT_DARK, SOFT_SLATE),
+                    ("میانگین هر تراکنش (ریال)", format_amount(average),
+                     TEXT_DARK, SOFT_SLATE),
+                ],
+                date_range=self._dates_subtitle(start_edit, end_edit))
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+        except Exception as e:  # noqa: BLE001 - نمایش خطای غیرمنتظره
+            QMessageBox.critical(
+                self, "خطا", f"خطا در تولید گزارش دستهٔ انتخابی: {e}")
 
     # ================================================================== #
     # ۸) گزارش حساب‌ها

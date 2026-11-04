@@ -241,6 +241,23 @@ def _t_category(raw):
     ]
 
 
+def _b_category_detail(raw):
+    """ریز تراکنش‌های یک دستهٔ خاص:
+    (تاریخ، حساب، شخص، مبلغ، توضیحات)"""
+    rows = []
+    for (date, account, person, amount, desc) in raw:
+        rows.append([
+            gregorian_to_shamsi(date) if date else "-",
+            account or "-", person or "-", _num(amount), desc or "-",
+        ])
+    return rows
+
+
+def _t_category_detail(raw):
+    return [TOTAL_LABEL, "", "", _num(sum(_num(r[3]) for r in raw)),
+            f"{len(raw)} تراکنش"]
+
+
 def _b_accounts(raw):
     """گزارش حساب‌ها: (حساب، تعداد تراکنش، جمع واریز، جمع برداشت، مانده)"""
     return [[str(r[0]), _num(r[1]), _num(r[2]), _num(r[3]), _num(r[4])] for r in raw]
@@ -364,6 +381,15 @@ SPECS = {
         "build": _b_category,
         "total": _t_category,
         "widths": [0.34, 0.16, 0.25, 0.25],
+    },
+    "category_detail": {
+        "title": "گزارش تراکنش‌های دسته‌بندی",
+        "file_prefix": "category_detail_report",
+        "columns": ["تاریخ", "حساب", "شخص", "مبلغ", "توضیحات"],
+        "numeric_idx": {3},
+        "build": _b_category_detail,
+        "total": _t_category_detail,
+        "widths": [0.14, 0.18, 0.16, 0.16, 0.36],
     },
     "accounts": {
         "title": "گزارش حساب‌ها",
