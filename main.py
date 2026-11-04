@@ -263,6 +263,27 @@ class FinanceApp(QMainWindow):
                 """
             )
 
+            # نسخه ۲.۷ — همگام‌سازی جدول loans با جدول اقساط (منبع حقیقت).
+            # باگ: هنگام ثبت/ویرایش وامی با «اقساط پرداخت‌شده»، ستون
+            # paid_amount به‌روز نمی‌شد و باقی‌مانده وام تسویه‌شده هنوز
+            # نمایش داده می‌شد (و برای وام‌های سوددار، جمع اقساط از اصل وام
+            # بیشتر است و باقی‌مانده «منفی» می‌شد). این دستور در هر اجرا
+            # idempotent است و paid_amount و installments_paid را دقیقاً از
+            # ردیف‌های is_paid=1 جدول اقساط بازمی‌سازد.
+            self.db_manager.execute(
+                """
+                UPDATE loans SET
+                    paid_amount = COALESCE((
+                        SELECT SUM(li.amount) FROM loan_installments li
+                        WHERE li.loan_id = loans.id AND li.is_paid = 1), 0),
+                    installments_paid = COALESCE((
+                        SELECT COUNT(*) FROM loan_installments li
+                        WHERE li.loan_id = loans.id AND li.is_paid = 1), 0)
+                WHERE EXISTS (SELECT 1 FROM loan_installments li
+                              WHERE li.loan_id = loans.id)
+                """
+            )
+
             # به‌روزرسانی جدول loans برای حذف end_date و افزودن installment_amount و installment_interval
             self.db_manager.execute("PRAGMA table_info(loans)")
             loan_columns = [col[1] for col in self.db_manager.fetchall()]

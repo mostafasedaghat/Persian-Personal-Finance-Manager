@@ -1357,25 +1357,42 @@ class ReportsTab(QWidget):
             return
         try:
             cat_type = "expense" if direction_combo.currentText() == "هزینه" else "income"
-            clauses, params = self._date_clauses(start_g, end_g)
-            # دسته‌های «انتقال بین حساب‌ها» سیستمی‌اند و در سهم دسته‌های
-            # هزینه/درآمد واقعی نمایش داده نمی‌شوند.
-            clauses.insert(0, "c.type = ?")
-            clauses.insert(1, "COALESCE(t.is_transfer, 0) = 0")
-            params.insert(0, cat_type)
+
+            # LEFT JOIN از جدول دسته‌ها: «همهٔ» دسته‌های آن جهت نمایش
+            # داده می‌شوند — حتی دسته‌هایی که در بازهٔ انتخابی تراکنش
+            # ندارند (تعداد ۰). شرط‌های تاریخ و انتقال به بخش ON
+            # منتقل شده‌اند تا دسته‌های بدون تراکنش حذف نشوند.
+            # دسته‌های سیستمی «انتقال بین حساب‌ها» نیز کنار گذاشته
+            # می‌شوند (انتقال پول، هزینه/درآمد واقعی نیست).
+            on_clauses = ["t.category_id = c.id",
+                          "COALESCE(t.is_transfer, 0) = 0"]
+            on_params = []
+            if start_g:
+                on_clauses.append("t.date >= ?")
+                on_params.append(start_g)
+            if end_g:
+                on_clauses.append("t.date <= ?")
+                on_params.append(end_g)
 
             query = f"""
                 SELECT c.name, COUNT(t.id), COALESCE(SUM(t.amount), 0)
-                FROM transactions t
-                JOIN categories c ON t.category_id = c.id
-                WHERE {' AND '.join(clauses)}
+                FROM categories c
+                LEFT JOIN transactions t
+                    ON {' AND '.join(on_clauses)}
+                WHERE c.type = ?
+                    AND c.name NOT IN ('انتقال بین حساب\u200cها (خروج)',
+                                       'انتقال بین حساب\u200cها (ورود)')
                 GROUP BY c.id
-                ORDER BY SUM(t.amount) DESC
+                ORDER BY (COUNT(t.id) = 0),
+                         COALESCE(SUM(t.amount), 0) DESC,
+                         c.name
             """
-            self.db_manager.execute(query, params)
+            # ترتیب پارامترها: اول شرط‌های ON (تاریخ‌ها) بعد WHERE
+            self.db_manager.execute(query, tuple(on_params + [cat_type]))
             results = self.db_manager.fetchall()
 
             grand_total = sum((r[2] or 0) for r in results) or 1
+            active_count = sum(1 for r in results if (r[1] or 0) > 0)
             raw_rows = [
                 (name, count, amount,
                  (amount or 0) * 100.0 / grand_total)
@@ -1411,11 +1428,16 @@ class ReportsTab(QWidget):
                      RED if cat_type == "expense" else GREEN,
                      SOFT_RED if cat_type == "expense" else SOFT_GREEN),
                     ("تعداد دسته فعال",
+                     format_amount(active_count), TEXT_DARK, SOFT_SLATE),
+                    ("کل دسته‌ها",
                      format_amount(len(results)), TEXT_DARK, SOFT_SLATE),
                 ],
                 date_range=self._dates_subtitle(start_edit, end_edit))
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+        except Exception as e:  # noqa: BLE001 - نمایش خطای غیرمنتظره
+            QMessageBox.critical(
+                self, "خطا", f"خطا در تولید گزارش دسته‌بندی‌ها: {e}")
 
     # ================================================================== #
     # ۸) گزارش حساب‌ها
@@ -1485,12 +1507,52 @@ class ReportsTab(QWidget):
         self._generate_loans()
 
     def _generate_loans(self):
+        """گزارش وام‌ها — مقادیر از جدول اقساط (منبع حقیقت).
+
+        باقی‌ماندهٔ هر وام = جمع اقساط پرداخت‌نشده؛ بنابراین وامِ تسویه‌شده
+        (همه اقساط پرداخت‌شده) باقی‌ماندهٔ صفر نشان می‌دهد و وام سوددار
+        (جمع اقساط > اصل وام) هرگز باقی‌ماندهٔ منفی پیدا نمی‌کند.
+        """
         try:
+            # ستون‌های وضعیت و مبالغ مؤثر از زیرکوئری‌های اقساط ساخته
+            # می‌شوند؛ برای وام‌های بدون ردیف قسط، مقادیر جدول loans.
             query = """
                 SELECT l.type, COALESCE(l.bank_name, '-'),
-                       l.total_amount, l.paid_amount,
-                       (l.total_amount - l.paid_amount),
-                       (l.installments_paid || '/' || l.installments_total)
+                    CASE WHEN EXISTS (SELECT 1 FROM loan_installments li
+                                      WHERE li.loan_id = l.id)
+                         THEN COALESCE((SELECT SUM(li.amount)
+                                        FROM loan_installments li
+                                        WHERE li.loan_id = l.id), 0)
+                         ELSE COALESCE(l.total_amount, 0) END,
+                    CASE WHEN EXISTS (SELECT 1 FROM loan_installments li
+                                      WHERE li.loan_id = l.id)
+                         THEN COALESCE((SELECT SUM(li.amount)
+                                        FROM loan_installments li
+                                        WHERE li.loan_id = l.id
+                                          AND li.is_paid = 1), 0)
+                         ELSE COALESCE(l.paid_amount, 0) END,
+                    CASE WHEN EXISTS (SELECT 1 FROM loan_installments li
+                                      WHERE li.loan_id = l.id)
+                         THEN COALESCE((SELECT SUM(li.amount)
+                                        FROM loan_installments li
+                                        WHERE li.loan_id = l.id
+                                          AND li.is_paid = 0), 0)
+                         ELSE MAX(COALESCE(l.total_amount, 0)
+                                  - COALESCE(l.paid_amount, 0), 0) END,
+                    (l.installments_paid || '/' || l.installments_total),
+                    CASE WHEN (EXISTS (SELECT 1 FROM loan_installments li
+                                       WHERE li.loan_id = l.id)
+                               AND COALESCE((SELECT SUM(li.amount)
+                                             FROM loan_installments li
+                                             WHERE li.loan_id = l.id
+                                               AND li.is_paid = 0), 0) <= 0)
+                           OR (COALESCE(l.installments_total, 0) > 0
+                               AND COALESCE(l.installments_paid, 0)
+                                   >= COALESCE(l.installments_total, 0))
+                           OR (COALESCE(l.total_amount, 0) > 0
+                               AND COALESCE(l.paid_amount, 0)
+                                   >= COALESCE(l.total_amount, 0))
+                         THEN 1 ELSE 0 END
                 FROM loans l
                 ORDER BY l.id DESC
             """
@@ -1498,31 +1560,39 @@ class ReportsTab(QWidget):
             results = self.db_manager.fetchall()
 
             type_labels = {"taken": "گرفته‌شده", "given": "داده‌شده"}
+            # ترتیب ستون‌های SELECT: 0=نوع 1=عنوان 2=کل 3=پرداخت‌شده
+            # 4=باقی‌مانده 5=پیشرفت اقساط 6=پرچم تسویه (0/1)
             raw_rows = [
-                (type_labels.get(r[0], str(r[0])), r[1], r[2] or 0,
-                 r[3] or 0, r[4] or 0, r[5] or "-")
+                (type_labels.get(r[0], str(r[0])), r[1],
+                 "✓ تسویه‌شده" if r[6] else "در جریان",
+                 r[2] or 0, r[3] or 0, max(r[4] or 0, 0),
+                 r[5] or "-")
                 for r in results
             ]
             display_rows = [
                 [type_labels.get(r[0], str(r[0])), r[1],
+                 "✓ تسویه‌شده" if r[6] else "در جریان",
                  format_amount(r[2]), format_amount(r[3]),
-                 format_amount(r[4]), r[5] or "-"]
+                 format_amount(max(r[4] or 0, 0)), r[5] or "-"]
                 for r in results
             ]
-            total_remaining = sum(r[4] for r in raw_rows)
+            settled_count = sum(1 for r in raw_rows if r[2] == "✓ تسویه‌شده")
+            total_remaining = sum(r[5] for r in raw_rows)
             total_row = [
                 "", "جمع کل",
-                format_amount(sum(r[2] for r in raw_rows)),
+                f"{settled_count} تسویه از {len(results)}",
                 format_amount(sum(r[3] for r in raw_rows)),
+                format_amount(sum(r[4] for r in raw_rows)),
                 format_amount(total_remaining),
                 f"{len(results)} وام",
             ]
 
             self._show_report_dialog(
                 title="گزارش وام‌ها",
-                subtitle="خلاصه وام‌ها: مبلغ، پرداخت‌شده، باقی‌مانده و پیشرفت اقساط",
-                columns=["نوع", "عنوان", "مبلغ کل", "پرداخت‌شده",
-                         "باقی‌مانده", "پیشرفت اقساط"],
+                subtitle="خلاصه وام‌ها: کل بازپرداخت، پرداخت‌شده، "
+                         "باقی‌مانده (از اقساط) و پیشرفت اقساط",
+                columns=["نوع", "عنوان", "وضعیت", "کل بازپرداخت",
+                         "پرداخت‌شده", "باقی‌مانده", "پیشرفت اقساط"],
                 rows=display_rows,
                 report_type="loans",
                 raw_data=raw_rows,
@@ -1530,9 +1600,12 @@ class ReportsTab(QWidget):
                 kpis=[
                     ("جمع باقی‌مانده وام‌ها (ریال)",
                      format_amount(total_remaining), RED, SOFT_RED),
-                    ("تعداد وام", format_amount(len(results)),
-                     TEXT_DARK, SOFT_SLATE),
+                    ("وام‌های تسویه‌شده",
+                     f"{settled_count} از {len(results)}", GREEN, SOFT_GREEN),
                 ],
                 date_range="وضعیت فعلی")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
+        except Exception as e:  # noqa: BLE001 - نمایش خطای غیرمنتظره
+            QMessageBox.critical(
+                self, "خطا", f"خطا در تولید گزارش وام‌ها: {e}")

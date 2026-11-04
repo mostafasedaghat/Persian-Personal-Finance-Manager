@@ -257,16 +257,22 @@ def _t_accounts(raw):
 
 
 def _b_loans(raw):
-    """خلاصه وام‌ها: (نوع، عنوان، مبلغ کل، پرداخت‌شده، باقی‌مانده، پیشرفت اقساط)"""
-    return [[str(r[0]), str(r[1]), _num(r[2]), _num(r[3]), _num(r[4]), str(r[5])] for r in raw]
+    """خلاصه وام‌ها: (نوع، عنوان، وضعیت، کل بازپرداخت، پرداخت‌شده،
+    باقی‌مانده، پیشرفت اقساط)"""
+    return [
+        [str(r[0]), str(r[1]), str(r[2]), _num(r[3]), _num(r[4]),
+         _num(r[5]), str(r[6])]
+        for r in raw
+    ]
 
 
 def _t_loans(raw):
+    settled = sum(1 for r in raw if "تسویه" in str(r[2]))
     return [
-        "", TOTAL_LABEL,
-        _num(sum(_num(r[2]) for r in raw)),
+        "", TOTAL_LABEL, f"{settled} تسویه از {len(raw)}",
         _num(sum(_num(r[3]) for r in raw)),
         _num(sum(_num(r[4]) for r in raw)),
+        _num(sum(_num(r[5]) for r in raw)),
         f"{len(raw)} وام",
     ]
 
@@ -371,11 +377,11 @@ SPECS = {
     "loans": {
         "title": "گزارش وام‌ها",
         "file_prefix": "loans_report",
-        "columns": ["نوع", "عنوان", "مبلغ کل", "پرداخت‌شده", "باقی‌مانده", "پیشرفت اقساط"],
-        "numeric_idx": {2, 3, 4},
+        "columns": ["نوع", "عنوان", "وضعیت", "کل بازپرداخت", "پرداخت‌شده", "باقی‌مانده", "پیشرفت اقساط"],
+        "numeric_idx": {3, 4, 5},
         "build": _b_loans,
         "total": _t_loans,
-        "widths": [0.12, 0.24, 0.17, 0.17, 0.17, 0.13],
+        "widths": [0.10, 0.21, 0.12, 0.16, 0.16, 0.16, 0.09],
     },
 }
 

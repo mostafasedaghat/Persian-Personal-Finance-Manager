@@ -61,12 +61,44 @@ SOFT_SLATE = "#f1f5f9"
 ROW_SETTLED_BG = "#f0fdf4"   # پس‌زمینه ردیف‌های تسویه‌شده
 
 # عبارت SQL برای تشخیص وام تسویه‌شده:
-# همه اقساط پرداخت شده باشند یا مبلغ پرداختی به مبلغ کل رسیده باشد.
+# ۱) اگر وام ردیف قسط دارد: هیچ قسط پرداخت‌نشده نمانده باشد؛
+# ۲) یا همه اقساط پرداخت شده باشند؛
+# ۳) یا مبلغ پرداختی به مبلغ کل رسیده باشد (وام‌های بدون ردیف قسط).
 SETTLED_SQL = (
-    "((COALESCE(l.installments_total, 0) > 0 "
+    "((EXISTS (SELECT 1 FROM loan_installments li WHERE li.loan_id = l.id) "
+    "AND COALESCE((SELECT SUM(li.amount) FROM loan_installments li "
+    "              WHERE li.loan_id = l.id AND li.is_paid = 0), 0) <= 0) "
+    "OR (COALESCE(l.installments_total, 0) > 0 "
     "AND COALESCE(l.installments_paid, 0) >= COALESCE(l.installments_total, 0)) "
     "OR (COALESCE(l.total_amount, 0) > 0 "
     "AND COALESCE(l.paid_amount, 0) >= COALESCE(l.total_amount, 0)))"
+)
+
+# محاسبهٔ مقادیر مؤثر هر وام بر اساس جدول اقساط (منبع حقیقت).
+# اگر وام ردیف قسط دارد، «کل بازپرداخت» و «پرداخت‌شده» و «باقی‌مانده»
+# از خود اقساط ساخته می‌شوند (جمع اقساط شامل سود است و ممکن است از اصل
+# وام بیشتر باشد). برای وام‌های بدون ردیف قسط، مقادیر ستون‌های جدول
+# loans استفاده می‌شوند.
+LOAN_TOTAL_SQL = (
+    "CASE WHEN EXISTS (SELECT 1 FROM loan_installments li "
+    "                   WHERE li.loan_id = l.id) "
+    "THEN COALESCE((SELECT SUM(li.amount) FROM loan_installments li "
+    "               WHERE li.loan_id = l.id), 0) "
+    "ELSE COALESCE(l.total_amount, 0) END"
+)
+LOAN_PAID_SQL = (
+    "CASE WHEN EXISTS (SELECT 1 FROM loan_installments li "
+    "                   WHERE li.loan_id = l.id) "
+    "THEN COALESCE((SELECT SUM(li.amount) FROM loan_installments li "
+    "               WHERE li.loan_id = l.id AND li.is_paid = 1), 0) "
+    "ELSE COALESCE(l.paid_amount, 0) END"
+)
+LOAN_REMAINING_SQL = (
+    "CASE WHEN EXISTS (SELECT 1 FROM loan_installments li "
+    "                   WHERE li.loan_id = l.id) "
+    "THEN COALESCE((SELECT SUM(li.amount) FROM loan_installments li "
+    "               WHERE li.loan_id = l.id AND li.is_paid = 0), 0) "
+    "ELSE MAX(COALESCE(l.total_amount, 0) - COALESCE(l.paid_amount, 0), 0) END"
 )
 
 # نگاشت عدد ماه → متن فارسی فاصله اقساط
@@ -729,7 +761,7 @@ class LoansTab(QWidget):
         self.loans_table.setObjectName("loansTable")
         self.loans_table.setColumnCount(12)
         self.loans_table.setHorizontalHeaderLabels(
-            ["عملیات", "وضعیت", "نوع", "عنوان", "مبلغ کل", "پرداخت‌شده",
+            ["عملیات", "وضعیت", "نوع", "عنوان", "کل بازپرداخت", "پرداخت‌شده",
              "باقی‌مانده", "سود", "شروع", "اقساط", "مبلغ قسط", "فاصله"])
         self._style_table(self.loans_table, stretch_column=3)
         self.loans_table.horizontalHeader().setSectionResizeMode(
@@ -981,13 +1013,20 @@ class LoansTab(QWidget):
                 self.loans_current_page = self.loans_total_pages
 
             # ۲. واکشی موارد صفحه فعلی — جدیدترین در صفحه اول
+            # مقادیر پولی از جدول اقساط ساخته می‌شوند (منبع حقیقت) تا
+            # وام تسویه‌شده هرگز باقی‌مانده نشان ندهد و وام سوددار
+            # باقی‌ماندهٔ منفی پیدا نکند.
             offset = (self.loans_current_page - 1) * self.loans_per_page
             self.db_manager.execute(
                 f"SELECT l.id, l.type, l.bank_name, l.total_amount, "
                 f"l.paid_amount, l.interest_rate, l.start_date, "
                 f"l.account_id, l.installments_total, "
                 f"l.installments_paid, l.installment_amount, "
-                f"l.installment_interval, a.name "
+                f"l.installment_interval, a.name, "
+                f"({LOAN_TOTAL_SQL}), ({LOAN_PAID_SQL}), "
+                f"({LOAN_REMAINING_SQL}), "
+                f"EXISTS (SELECT 1 FROM loan_installments li "
+                f"        WHERE li.loan_id = l.id) "
                 f"FROM loans l "
                 f"LEFT JOIN accounts a ON l.account_id = a.id "
                 f"{where_sql} "
@@ -1015,12 +1054,17 @@ class LoansTab(QWidget):
                       paid_amount, interest_rate, start_date, account_id,
                       installments_total, installments_paid,
                       installment_amount, installment_interval,
-                      account_name) in enumerate(loans):
+                      account_name, eff_total, eff_paid, eff_remaining,
+                      has_installments) in enumerate(loans):
 
-                settled = self._is_settled(
-                    total_amount, paid_amount, installments_total,
-                    installments_paid)
-                remaining = max((total_amount or 0) - (paid_amount or 0), 0)
+                # مقادیر مؤثر: برای وام دارای قسط، از خود اقساط محاسبه
+                # شده‌اند (شامل سود)؛ وگرنه از ستون‌های جدول loans.
+                settled = (
+                    (has_installments and (eff_remaining or 0) <= 0)
+                    or self._is_settled(
+                        total_amount, paid_amount, installments_total,
+                        installments_paid))
+                remaining = max(eff_remaining or 0, 0)
 
                 # پس‌زمینه ردیف تسویه‌شده روشن‌سبز است
                 row_bg = QColor(ROW_SETTLED_BG) if settled else None
@@ -1094,8 +1138,10 @@ class LoansTab(QWidget):
                     f"حساب: {account_name or '-'}")
                 self.loans_table.setItem(row, 3, title_item)
 
-                # ---- ستون مبلغ کل ----
-                amount_item = QTableWidgetItem(format_amount(total_amount))
+                # ---- ستون کل بازپرداخت ----
+                # برای وام دارای قسط، جمع واقعی اقساط (اصل + سود) است؛
+                # برای وام بدون قسط همان مبلغ کل.
+                amount_item = QTableWidgetItem(format_amount(eff_total))
                 amount_item.setTextAlignment(
                     Qt.AlignmentFlag.AlignLeft
                     | Qt.AlignmentFlag.AlignVCenter)
@@ -1105,7 +1151,7 @@ class LoansTab(QWidget):
                 self.loans_table.setItem(row, 4, amount_item)
 
                 # ---- ستون پرداخت‌شده ----
-                paid_item = QTableWidgetItem(format_amount(paid_amount))
+                paid_item = QTableWidgetItem(format_amount(eff_paid))
                 paid_item.setTextAlignment(
                     Qt.AlignmentFlag.AlignLeft
                     | Qt.AlignmentFlag.AlignVCenter)
@@ -1188,24 +1234,26 @@ class LoansTab(QWidget):
             self.loans_current_page < self.loans_total_pages)
 
     def _update_summary(self):
-        """به‌روزرسانی کارت‌های خلاصه (بر اساس کل داده‌ها)."""
-        # در این کوئری‌ها جدول alias ندارد؛ نسخه بدون پیشوند «l.»
-        settled_sql = SETTLED_SQL.replace("l.", "")
+        """به‌روزرسانی کارت‌های خلاصه (بر اساس کل داده‌ها).
+
+        باقی‌ماندهٔ هر وام از اقساط پرداخت‌نشده محاسبه می‌شود (منبع
+        حقیقت)؛ وام‌های بدون ردیف قسط از ستون‌های جدول loans.
+        """
         try:
             self.db_manager.execute(
-                "SELECT COALESCE(SUM(total_amount - paid_amount), 0) "
-                f"FROM loans WHERE type = 'taken' "
-                f"AND NOT ({settled_sql})")
+                f"SELECT COALESCE(SUM({LOAN_REMAINING_SQL}), 0) "
+                f"FROM loans l WHERE l.type = 'taken' "
+                f"AND NOT ({SETTLED_SQL})")
             remaining_taken = self.db_manager.fetchone()[0]
 
             self.db_manager.execute(
-                "SELECT COALESCE(SUM(total_amount - paid_amount), 0) "
-                f"FROM loans WHERE type = 'given' "
-                f"AND NOT ({settled_sql})")
+                f"SELECT COALESCE(SUM({LOAN_REMAINING_SQL}), 0) "
+                f"FROM loans l WHERE l.type = 'given' "
+                f"AND NOT ({SETTLED_SQL})")
             remaining_given = self.db_manager.fetchone()[0]
 
             self.db_manager.execute(
-                f"SELECT COUNT(*) FROM loans WHERE {settled_sql}")
+                f"SELECT COUNT(*) FROM loans l WHERE {SETTLED_SQL}")
             settled_count = self.db_manager.fetchone()[0]
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
@@ -1327,6 +1375,18 @@ class LoansTab(QWidget):
                     "VALUES (?, ?, ?, ?)",
                     (loan_id, installment_amount, due_date_gregorian,
                      is_paid))
+
+            # همگام‌سازی paid_amount با اقساط پرداخت‌شده (رفع باگ:
+            # ثبت وام با اقساط پرداخت‌شده، paid_amount را صفر می‌گذاشت
+            # و باقی‌ماندهٔ وام تسویه‌شده به‌اشتباه نمایش داده می‌شد).
+            self.db_manager.execute(
+                """
+                UPDATE loans SET paid_amount = COALESCE((
+                    SELECT SUM(amount) FROM loan_installments
+                    WHERE loan_id = ? AND is_paid = 1), 0)
+                WHERE id = ?
+                """,
+                (loan_id, loan_id))
 
             self.db_manager.commit()
 
@@ -1643,6 +1703,18 @@ class LoansTab(QWidget):
                     (loan_id, installment_amount, due_date_gregorian,
                      is_paid))
 
+            # همگام‌سازی paid_amount با اقساط بازسازی‌شده (رفع باگ:
+            # ویرایش وام، paid_amount قدیمی را نگه می‌داشت و باقی‌ماندهٔ
+            # وام تسویه‌شده اشتباه/منفی نمایش داده می‌شد).
+            self.db_manager.execute(
+                """
+                UPDATE loans SET paid_amount = COALESCE((
+                    SELECT SUM(amount) FROM loan_installments
+                    WHERE loan_id = ? AND is_paid = 1), 0)
+                WHERE id = ?
+                """,
+                (loan_id, loan_id))
+
             self.db_manager.commit()
             dialog.accept()
             self.refresh()
@@ -1684,10 +1756,22 @@ class LoansTab(QWidget):
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             return
 
-        settled = self._is_settled(
-            total_amount, paid_amount, installments_total,
-            installments_paid)
-        remaining = max((total_amount or 0) - (paid_amount or 0), 0)
+        # مقادیر مؤثر از خود اقساط (منبع حقیقت): وام تسویه‌شده هرگز
+        # باقی‌مانده نشان نمی‌دهد و وام سوددار باقی‌ماندهٔ منفی نمی‌گیرد.
+        if installments:
+            eff_total = sum(a for _, a, _, _, _ in installments)
+            eff_paid = sum(a for _, a, _, is_paid, _ in installments
+                           if is_paid)
+            eff_remaining = max(eff_total - eff_paid, 0)
+            settled = (eff_total - eff_paid) <= 0
+        else:
+            eff_total = total_amount or 0
+            eff_paid = paid_amount or 0
+            eff_remaining = max(
+                (total_amount or 0) - (paid_amount or 0), 0)
+            settled = self._is_settled(
+                total_amount, paid_amount, installments_total,
+                installments_paid)
         today = datetime.now().date()
 
         dialog = QDialog(self)
@@ -1714,11 +1798,11 @@ class LoansTab(QWidget):
         info_label = QLabel(
             f"نوع: <b style='color:{RED if is_taken else GREEN};'>"
             f"{'گرفته‌شده' if is_taken else 'داده‌شده'}</b>"
-            f" &nbsp;|&nbsp; مبلغ کل: <b>{format_amount(total_amount)}"
+            f" &nbsp;|&nbsp; کل بازپرداخت: <b>{format_amount(eff_total)}"
             f" ریال</b>"
-            f" &nbsp;|&nbsp; پرداخت‌شده: <b>{format_amount(paid_amount)}"
+            f" &nbsp;|&nbsp; پرداخت‌شده: <b>{format_amount(eff_paid)}"
             f" ریال</b>"
-            f" &nbsp;|&nbsp; باقی‌مانده: <b>{format_amount(remaining)}"
+            f" &nbsp;|&nbsp; باقی‌مانده: <b>{format_amount(eff_remaining)}"
             f" ریال</b>"
             f" &nbsp;|&nbsp; اقساط: <b>{installments_paid or 0} از "
             f"{installments_total or 0}</b>"
