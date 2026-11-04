@@ -265,7 +265,7 @@ class ReportsTab(QWidget):
 
         cards = [
             ("📈", SOFT_GREEN, "گزارش کلی",
-             "خلاصه وضعیت مالی: درآمد، هزینه، بدهی/طلب و مانده حساب‌ها",
+             "پول نقد، دارایی خالص، گردش تراکنش‌ها، وام‌ها و بدهی/طلب",
              self.open_general_report),
             ("💵", SOFT_RED, "گزارش هزینه/درآمد",
              "ریز تراکنش‌ها با فیلتر حساب، شخص، نوع و بازه تاریخ",
@@ -526,12 +526,15 @@ class ReportsTab(QWidget):
 
     def _show_report_dialog(self, *, title, subtitle, columns, rows,
                             report_type, raw_data, total_row=None,
-                            kpis=None, chart_widget=None, date_range=None):
+                            kpis=None, chart_widget=None, date_range=None,
+                            notes=None):
         """نمایش حرفه‌ای گزارش.
 
         rows: ردیف‌های نمایشی (رشته‌ای) — total_row هم رشته‌ای است.
         raw_data: داده خام برای موتور خروجی (report_exporter).
         kpis: لیست (label, value, fg, bg)
+        notes: لیست متن‌های توضیحی که زیر جدول نمایش داده می‌شوند
+               (فقط در رابط کاربری؛ در فایل‌های خروجی نمی‌آیند).
         """
         if not rows:
             QMessageBox.information(
@@ -621,6 +624,24 @@ class ReportsTab(QWidget):
             QHeaderView.ResizeMode.Interactive)
         table.resizeColumnsToContents()
         lay.addWidget(table, 1)
+
+        # --- نکته‌های توضیحی (اختیاری) ---
+        if notes:
+            notes_frame = QFrame()
+            notes_frame.setStyleSheet(
+                f"QFrame {{ background-color: {SOFT_SLATE};"
+                f" border: 1px solid {CARD_BORDER}; border-radius: 10px; }}")
+            notes_lay = QVBoxLayout(notes_frame)
+            notes_lay.setContentsMargins(12, 8, 12, 8)
+            notes_lay.setSpacing(4)
+            for note_text in notes:
+                note_lbl = QLabel(note_text)
+                note_lbl.setWordWrap(True)
+                note_lbl.setStyleSheet(
+                    f"color: {TEXT_MUTED}; font-size: 11.5px;"
+                    " background: transparent;")
+                notes_lay.addWidget(note_lbl)
+            lay.addWidget(notes_frame)
 
         # --- دکمه‌های خروجی ---
         btn_row = QHBoxLayout()
@@ -731,16 +752,46 @@ class ReportsTab(QWidget):
             accounts_total = _scalar(
                 "SELECT COALESCE(SUM(balance), 0) FROM accounts", [])
 
+            # وام‌ها (مستقل از بازه) — اصل وام دریافتی «درآمد» نیست؛
+            # فقط برای شفاف شدن تفاوتِ گردش تراکنش‌ها با پول نقد گزارش
+            # می‌شود.
+            loan_taken_total = _scalar(
+                "SELECT COALESCE(SUM(total_amount), 0) FROM loans "
+                "WHERE type = 'taken'", [])
+            loan_taken_paid = _scalar(
+                "SELECT COALESCE(SUM(paid_amount), 0) FROM loans "
+                "WHERE type = 'taken'", [])
+            loan_taken_remaining = max(loan_taken_total - loan_taken_paid, 0)
+            # باقی‌مانده وام‌های داده‌شده، دارایی است (باید پس داده شود)
+            loan_given_remaining = _scalar(
+                "SELECT COALESCE(SUM(MAX(total_amount - paid_amount, 0)), 0) "
+                "FROM loans WHERE type = 'given'", [])
+
             net = total_income - total_expense
+
+            # دارایی خالص = پول نقد + طلب‌ها + باقی‌مانده وام‌های داده‌شده
+            #                − بدهی‌ها − باقی‌مانده وام‌های گرفته‌شده
+            net_worth = (accounts_total + open_credit + loan_given_remaining
+                         - open_debt - loan_taken_remaining)
 
             rows = [
                 ["مجموع درآمدها", format_amount(total_income)],
                 ["مجموع هزینه‌ها", format_amount(total_expense)],
-                ["مانده خالص (درآمد − هزینه)", format_amount(net)],
+                ["خالص گردش تراکنش‌ها (درآمد − هزینه)", format_amount(net)],
                 ["تعداد تراکنش‌ها", format_amount(tx_count)],
-                ["جمع بدهی‌های در جریان (بدهکار من)", format_amount(open_debt)],
-                ["جمع طلب‌های در جریان (طلبکار من)", format_amount(open_credit)],
-                ["جمع مانده حساب‌ها", format_amount(accounts_total)],
+                ["اصل وام‌های دریافتی (وارد حساب، ولی درآمد نیست)",
+                 format_amount(loan_taken_total)],
+                ["اقساط وام پرداخت‌شده (کل)", format_amount(loan_taken_paid)],
+                ["باقی‌مانده وام‌های گرفته‌شده",
+                 format_amount(loan_taken_remaining)],
+                ["جمع بدهی‌های در جریان (بدهکار من)",
+                 format_amount(open_debt)],
+                ["جمع طلب‌های در جریان (طلبکار من)",
+                 format_amount(open_credit)],
+                ["جمع مانده حساب‌ها (پول نقد فعلی)",
+                 format_amount(accounts_total)],
+                ["دارایی خالص (حساب‌ها + طلب‌ها − بدهی‌ها − باقی‌مانده وام)",
+                 format_amount(net_worth)],
             ]
             dialog.accept()
 
@@ -752,11 +803,26 @@ class ReportsTab(QWidget):
                 report_type="general",
                 raw_data=rows,
                 kpis=[
-                    ("جمع درآمد (ریال)", format_amount(total_income), GREEN, SOFT_GREEN),
-                    ("جمع هزینه (ریال)", format_amount(total_expense), RED, SOFT_RED),
-                    ("مانده خالص (ریال)", format_amount(net), TEXT_DARK, SOFT_SLATE),
+                    ("پول نقد فعلی (ریال)", format_amount(accounts_total),
+                     GREEN, SOFT_GREEN),
+                    ("دارایی خالص (ریال)", format_amount(net_worth),
+                     TEXT_DARK, SOFT_SLATE),
+                    ("خالص گردش تراکنش‌ها (ریال)", format_amount(net),
+                     SLATE, SOFT_SLATE),
                 ],
-                date_range=self._dates_subtitle(start_edit, end_edit))
+                date_range=self._dates_subtitle(start_edit, end_edit),
+                notes=[
+                    "💡 «خالص گردش تراکنش‌ها» فقط اختلافِ جمع درآمد و هزینهٔ "
+                    "ثبت‌شده است؛ به‌خودیِ خود پول شما نیست.",
+                    "💰 پول واقعی شما همان «جمع مانده حساب‌ها» است.",
+                    "🔍 چرا این دو فرق دارند؟ ۱) اصل وام دریافتی وارد حساب "
+                    "می‌شود ولی درآمد محاسبه نمی‌شود؛ ۲) اقساط و تسویه‌هایی "
+                    "که قبل از نسخه‌های ۲.۴ و ۲.۵ پرداخت شده‌اند، از حساب کم "
+                    "شده‌اند بدون آنکه تراکنش هزینه ثبت شود؛ ۳) موجودی اولیهٔ "
+                    "حساب‌ها تراکنش ندارد.",
+                    "🧮 دارایی خالص = پول نقد + طلب‌ها + باقی‌مانده وام‌های "
+                    "داده‌شده − بدهی‌ها − باقی‌مانده وام‌های گرفته‌شده.",
+                ])
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
 
