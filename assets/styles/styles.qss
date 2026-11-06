@@ -29,23 +29,15 @@ QTableWidget {
     border-radius: 5px;
 }
 
-PersianCalendarWidget {
-    background-color: #f9f9f9;
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    padding: 5px;
-}
-
-PersianCalendarWidget QPushButton {
-    background-color: #666;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-family: Vazir, Arial;
-}
-
-PersianCalendarWidget QPushButton:hover {
-    background-color: #555;
-}
+/* ------------------------------------------------------------------
+   تقویم شمسی (PersianCalendarWidget)
+   نکته: از نسخه ۳.۰ تقویم، استایل کامل خودش را داخل
+   ui/components/custom_widgets.py اعمال می‌کند (شیوه‌نامهٔ محلی بر
+   شیوه‌نامهٔ سراسری مقدم است). قواعد قدیمی تیرهٔ
+   «PersianCalendarWidget QPushButton { background-color: #666 }» که
+   باعث ناخوانا شدن پاپ‌آپ انتخاب تاریخ در تم تاریک ویندوز می‌شدند،
+   حذف شدند.
+------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------
    جعبه‌پیام‌ها (QMessageBox)

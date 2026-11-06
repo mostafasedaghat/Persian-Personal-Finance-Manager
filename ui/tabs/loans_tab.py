@@ -1461,11 +1461,13 @@ class LoansTab(QWidget):
         edit_title = QLineEdit(bank_name)
 
         edit_amount = NumberInput()
-        edit_amount.setText(str(total_amount) if total_amount else "")
+        # ستون REAL است؛ بدون int() مقدار «123000000.0» در فیلد می‌افتاد
+        edit_amount.setText(
+            str(int(total_amount)) if total_amount else "")
 
         edit_interest = NumberInput()
         edit_interest.setText(
-            str(interest_rate) if interest_rate else "")
+            str(int(interest_rate)) if interest_rate else "")
 
         edit_account = QComboBox()
         try:
@@ -1503,7 +1505,7 @@ class LoansTab(QWidget):
 
         edit_installment_amount = NumberInput()
         edit_installment_amount.setText(
-            str(installment_amount) if installment_amount else "")
+            str(int(installment_amount)) if installment_amount else "")
 
         edit_interval_type_combo = QComboBox()
         edit_interval_type_combo.addItems([
@@ -1954,7 +1956,7 @@ class LoansTab(QWidget):
         layout.setSpacing(9)
 
         edit_amount = NumberInput()
-        edit_amount.setText(str(amount) if amount else "")
+        edit_amount.setText(str(int(amount)) if amount else "")
         edit_due_date = QLineEdit(gregorian_to_shamsi(due_date))
         edit_due_date.setReadOnly(True)
         edit_due_date.setPlaceholderText("1404/02/13")

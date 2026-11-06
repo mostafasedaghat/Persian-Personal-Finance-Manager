@@ -1509,7 +1509,7 @@ class DebtsTab(QWidget):
                         break
 
             edit_amount = NumberInput()
-            edit_amount.setText(str(int(amount)) if amount == int(amount) else str(amount))
+            edit_amount.setText(str(int(amount)) if amount else "")
 
             edit_account = QComboBox()
             self.db_manager.execute("SELECT id, name, balance FROM accounts")

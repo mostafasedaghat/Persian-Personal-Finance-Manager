@@ -1164,7 +1164,7 @@ class TransactionsTab(QWidget):
                 lambda _: fill_categories())
 
             edit_amount = NumberInput()
-            edit_amount.setText(str(int(amount)) if amount == int(amount) else str(amount))
+            edit_amount.setText(str(int(amount)) if amount else "")
             edit_date = QLineEdit(gregorian_to_shamsi(date))
             edit_date.setReadOnly(True)
             edit_date.setPlaceholderText("1404/02/13")
