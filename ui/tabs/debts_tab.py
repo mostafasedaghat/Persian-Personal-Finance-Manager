@@ -1922,17 +1922,61 @@ class DebtsTab(QWidget):
             remaining_label = QLabel(f"{format_amount(remaining_amount)} ریال")
             layout.addRow("مبلغ باقی‌مانده:", remaining_label)
 
-            # چک‌باکس انتقال وجه
-            settle_has_payment_checkbox = QCheckBox("انتقال وجه انجام می‌شود؟")
+            # مبلغ تسویه (نسخه ۳.۱) — همیشه فعال است؛ مستقل از تیک
+            # انتقال وجه. با غیرفعال بودن تیک هم می‌توان مبلغ دلخواهی
+            # از مانده کسر کرد (مثلاً کسر بابت کاری که طرف مقابل انجام
+            # داده و بابت آن پولی رد و بدل نشده — تهاتر/معاوضه).
+            settle_payment_input = NumberInput()
+            settle_payment_input.setPlaceholderText("مبلغ کسرشده از مانده")
+            if remaining_amount > 0:
+                settle_payment_input.setText(str(int(remaining_amount)))
+
+            # دکمهٔ بازگرداندن سریع مبلغ به کل مانده
+            reset_amount_btn = QPushButton("↺ کل مانده")
+            reset_amount_btn.setToolTip(
+                "بازگرداندن مبلغ تسویه به کل مبلغ باقی‌مانده")
+            reset_amount_btn.setFixedWidth(96)
+            reset_amount_btn.setMinimumHeight(34)
+            reset_amount_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            reset_amount_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {SOFT_SLATE}; color: {SLATE};
+                    border: 1px solid {CARD_BORDER}; border-radius: 8px;
+                    font-size: 12px; font-weight: bold;
+                }}
+                QPushButton:hover {{ background-color: #e2e8f0; }}
+                QPushButton:disabled {{ color: #94a3b8; }}
+            """)
+
+            def reset_settle_amount():
+                if remaining_amount > 0:
+                    settle_payment_input.setText(str(int(remaining_amount)))
+
+            reset_amount_btn.clicked.connect(reset_settle_amount)
+
+            amount_row = QHBoxLayout()
+            amount_row.setSpacing(6)
+            amount_row.addWidget(settle_payment_input, 1)
+            amount_row.addWidget(reset_amount_btn)
+            layout.addRow("مبلغ تسویه (کسر از مانده):", amount_row)
+
+            settle_amount_hint = QLabel(
+                "💡 این مبلغ از مانده بدهی/طلب کسر می‌شود. اگر تیک «انتقال "
+                "وجه» فعال باشد، همان مبلغ به‌عنوان تراکنش واقعی در حساب "
+                "انتخابی ثبت و موجودی به‌روزرسانی می‌شود؛ بدون تیک، فقط "
+                "مانده کم می‌شود و تراکنشی ثبت نمی‌گردد (کسر بابت کار، "
+                "معاوضه یا تهاتر).")
+            settle_amount_hint.setStyleSheet(
+                f"color: {TEXT_MUTED}; font-size: 12px; font-weight: normal;")
+            settle_amount_hint.setWordWrap(True)
+            layout.addRow("", settle_amount_hint)
+
+            # چک‌باکس انتقال وجه — فقط تعیین می‌کند پول واقعاً جابه‌جا
+            # شده است یا نه؛ روی مبلغ تسویه اثری ندارد.
+            settle_has_payment_checkbox = QCheckBox(
+                "انتقال وجه انجام می‌شود؟ (ثبت تراکنش در حساب)")
             settle_has_payment_checkbox.setChecked(account_id is not None)
             layout.addRow("", settle_has_payment_checkbox)
-
-            # ورودی مبلغ پرداخت‌شده
-            settle_payment_input = NumberInput()
-            settle_payment_input.setPlaceholderText("مبلغ پرداخت‌شده (اختیاری)")
-            if account_id is not None and remaining_amount > 0:
-                settle_payment_input.setText(str(int(remaining_amount)))
-            layout.addRow("مبلغ پرداخت‌شده:", settle_payment_input)
 
             # انتخاب حساب
             settle_account_combo = QComboBox()
@@ -1969,17 +2013,14 @@ class DebtsTab(QWidget):
             settle_date_hint.setWordWrap(True)
             layout.addRow("", settle_date_hint)
 
-            # کنترل فعال/غیرفعال بودن فیلدها بر اساس چک‌باکس
+            # کنترل فعال/غیرفعال بودن فیلدها بر اساس چک‌باکس (نسخه ۳.۱):
+            # مبلغ تسویه همیشه فعال است — کسر جزئی بدون انتقال وجه هم
+            # مجاز است. تیک فقط حساب مرتبط را فعال/غیرفعال می‌کند.
             def toggle_settle_fields(state):
                 is_checked = (state == Qt.CheckState.Checked.value)
-                settle_payment_input.setEnabled(is_checked)
                 settle_account_combo.setEnabled(is_checked)
-
                 if not is_checked:
-                    settle_payment_input.clear()
                     settle_account_combo.setCurrentIndex(0)
-                else:
-                    settle_payment_input.setText(str(int(remaining_amount)))
 
             settle_has_payment_checkbox.stateChanged.connect(toggle_settle_fields)
             toggle_settle_fields(settle_has_payment_checkbox.checkState().value)
@@ -2020,27 +2061,37 @@ class DebtsTab(QWidget):
 
         try:
             self.db_manager.execute(
-                "SELECT amount, paid_amount, person_id FROM debts WHERE id = ?",
+                "SELECT amount, paid_amount, person_id, account_id "
+                "FROM debts WHERE id = ?",
                 (debt_id,))
             debt = self.db_manager.fetchone()
             if not debt:
                 QMessageBox.warning(self, "خطا", "بدهی/طلب یافت نشد!")
                 self.db_manager.rollback()
                 return
-            total_debt_amount, current_paid_amount, person_id = debt
+            (total_debt_amount, current_paid_amount, person_id,
+             existing_account_id) = debt
             remaining_amount = total_debt_amount - current_paid_amount
 
+            # اعتبارسنجی مبلغ تسویه (نسخه ۳.۱) — در هر دو حالت با/بدون
+            # انتقال وجه یکسان است؛ مانده از دیتابیس تازه خوانده می‌شود
+            # تا در برابر تغییرات هم‌زمان (مانده قدیمی/ویرایش‌شده) مقاوم
+            # باشد و عدد بیش از مانده هرگز ثبت نشود.
+            if payment_amount is None or payment_amount <= 0:
+                QMessageBox.warning(
+                    self, "خطا", "مبلغ تسویه باید بیشتر از صفر باشد!")
+                self.db_manager.rollback()
+                return
+            if payment_amount > remaining_amount:
+                QMessageBox.warning(
+                    self, "خطا",
+                    "مبلغ تسویه نمی‌تواند بیشتر از مبلغ باقی‌مانده باشد!")
+                self.db_manager.rollback()
+                return
+
             if has_transfer_checked:
-                if payment_amount is None or payment_amount <= 0:
-                    QMessageBox.warning(self, "خطا", "مبلغ پرداخت‌شده باید بیشتر از صفر باشد!")
-                    self.db_manager.rollback()
-                    return
                 if not account_id:
                     QMessageBox.warning(self, "خطا", "لطفاً حساب مرتبط را انتخاب کنید!")
-                    self.db_manager.rollback()
-                    return
-                if payment_amount > remaining_amount:
-                    QMessageBox.warning(self, "خطا", "مبلغ پرداخت‌شده نمی‌تواند بیشتر از مبلغ باقی‌مانده باشد!")
                     self.db_manager.rollback()
                     return
 
@@ -2099,9 +2150,13 @@ class DebtsTab(QWidget):
                      payment_amount, today_gregorian, description, debt_id))
 
             else:
-                payment_amount = remaining_amount
+                # کسر بدون انتقال وجه (نسخه ۳.۱) — پولی جابه‌جا نمی‌شود و
+                # تراکنشی ثبت نمی‌شود؛ فقط مبلغ تعیین‌شده از مانده بدهی/
+                # طلب کسر می‌گردد (کسر بابت کار، معاوضه یا تهاتر).
+                # پیوند حساب اولیهٔ رکورد حفظ می‌شود تا اثر ثبت پولیِ
+                # اولیه در ویرایش‌های بعدی به‌درستی معکوس بماند.
+                account_id = existing_account_id
                 new_paid_amount = current_paid_amount + payment_amount
-                account_id = None
 
             is_paid = 1 if new_paid_amount >= total_debt_amount else 0
 
@@ -2117,11 +2172,18 @@ class DebtsTab(QWidget):
             self.load_debts()
             self.data_changed.emit()
             dialog.accept()
+            if has_transfer_checked:
+                success_text = (
+                    f"پرداخت به مبلغ {format_amount(payment_amount)} ریال در تاریخ "
+                    f"{gregorian_to_shamsi(settle_date)} ثبت شد!")
+            else:
+                success_text = (
+                    f"مبلغ {format_amount(payment_amount)} ریال بدون انتقال وجه "
+                    "از مانده کسر شد!")
             QMessageBox.information(
                 self, "موفق",
-                f"پرداخت به مبلغ {format_amount(payment_amount)} ریال در تاریخ "
-                f"{gregorian_to_shamsi(settle_date)} ثبت شد! "
-                f"وضعیت تسویه: {'کامل' if is_paid else 'جزئی'}")
+                success_text +
+                f" وضعیت تسویه: {'کامل' if is_paid else 'جزئی'}")
         except sqlite3.Error as e:
             QMessageBox.critical(self, "خطا", f"خطای پایگاه داده: {e}")
             self.db_manager.rollback()
