@@ -38,7 +38,7 @@ from PyInstaller.utils.hooks import collect_data_files
 
 # منابع برنامه که باید داخل بسته قرار بگیرند
 datas = [
-    ('assets/fonts', 'assets/fonts'),        # فونت وزیر
+    ('assets/fonts', 'assets/fonts'),        # فونت وزیرمتن (معمولی/متوسط/ضخیم)
     ('assets/styles', 'assets/styles'),      # استایل سراسری (styles.qss)
     ('assets/icon.ico', 'assets'),           # آیکون برنامه
 ]

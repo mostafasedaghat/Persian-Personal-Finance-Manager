@@ -74,7 +74,7 @@ class SettingsTab(QWidget):
     STYLESHEET = f"""
     SettingsTab {{
         background-color: {PAGE_BG};
-        font-family: 'Vazir', 'Arial';
+        font-family: 'Vazirmatn';
     }}
 
     /* ---------- هدر ---------- */

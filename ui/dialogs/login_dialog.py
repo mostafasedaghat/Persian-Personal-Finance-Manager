@@ -47,7 +47,7 @@ class LoginDialog(QDialog):
         self.setStyleSheet(f"""
             LoginDialog {{
                 background-color: #eef1f6;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
             }}
             QFrame#banner {{
                 background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,

@@ -19,8 +19,8 @@ import os
 import sys
 
 APP_NAME = "نرم‌افزار حسابداری شخصی"
-APP_VERSION = "3.1"
-APP_RELEASE_NAME = "کسر جزئی بدون انتقال وجه"
+APP_VERSION = "3.2"
+APP_RELEASE_NAME = "فونت وزیرمتن و مستندات تصویری"
 
 
 # ------------------------------------------------------------------ #
@@ -65,8 +65,22 @@ def resource_path(*parts) -> str:
 # مسیرهای مشخص برنامه
 # ------------------------------------------------------------------ #
 def font_path() -> str:
-    """فایل فونت وزیر."""
-    return resource_path("assets", "fonts", "Vazir.ttf")
+    """فایل فونت اصلی (وزن معمولی Vazirmatn)."""
+    return resource_path("assets", "fonts", "Vazirmatn-Regular.ttf")
+
+
+def font_paths() -> list:
+    """همهٔ فایل‌های فونت برنامه (معمولی، متوسط، ضخیم).
+
+    فونت‌ها از خانوادهٔ «وزیرمتن» (Vazirmatn) هستند — نسخهٔ تکامل‌
+    یافتهٔ فونت وزیر با حروف و فاصله‌گذاری بهتر. وجود وزن Bold واقعی
+    باعث می‌شود متن‌های ضخیم برنامه با «بولد مصنوعی» (کشیده‌شده و
+    بدشکل) رندر نشوند.
+    """
+    names = ("Vazirmatn-Regular.ttf", "Vazirmatn-Medium.ttf",
+             "Vazirmatn-Bold.ttf")
+    paths = [resource_path("assets", "fonts", n) for n in names]
+    return [p for p in paths if os.path.exists(p)]
 
 
 def stylesheet_path() -> str:
@@ -95,68 +109,94 @@ def reports_dir() -> str:
 
 
 # ------------------------------------------------------------------ #
-# ثبت فونت وزیر (یک بار در طول اجرا)
+# ثبت فونت وزیرمتن (یک بار در طول اجرا)
 # ------------------------------------------------------------------ #
 def ensure_vazir_font() -> bool:
-    """ثبت فونت وزیر برای گزارش‌های PDF (reportlab).
+    """ثبت فونت وزیرمتن برای گزارش‌های PDF (reportlab).
 
-    اگر فونت از قبل ثبت شده باشد یا فایل وجود نداشته باشد، کاری
-    نمی‌کند. خروجی: True اگر فونت «Vazir» در دسترس reportlab باشد.
+    هر سه وزن ثبت می‌شوند و با registerFontFamily به هم وصل می‌گردند
+    تا <b> در متن و Font(bold=True) به وزن ضخیمِ واقعی مپ شوند.
+    خروجی: True اگر فونت «Vazirmatn» در دسترس reportlab باشد.
     """
     try:
-        from reportlab.pdfbase.pdfmetrics import getRegisteredFontNames, registerFont
+        from reportlab.pdfbase.pdfmetrics import (
+            getRegisteredFontNames, registerFont, registerFontFamily,
+        )
         from reportlab.pdfbase.ttfonts import TTFont
     except ImportError:
         return False
 
-    if "Vazir" in getRegisteredFontNames():
+    if "Vazirmatn" in getRegisteredFontNames():
         return True
 
-    path = font_path()
-    if not os.path.exists(path):
+    regular = font_path()
+    bold = resource_path("assets", "fonts", "Vazirmatn-Bold.ttf")
+    medium = resource_path("assets", "fonts", "Vazirmatn-Medium.ttf")
+    if not os.path.exists(regular):
         return False
     try:
-        registerFont(TTFont("Vazir", path))
+        registerFont(TTFont("Vazirmatn", regular))
+        if os.path.exists(bold):
+            registerFont(TTFont("Vazirmatn-Bold", bold))
+        else:
+            registerFont(TTFont("Vazirmatn-Bold", regular))
+        if os.path.exists(medium):
+            registerFont(TTFont("Vazirmatn-Medium", medium))
+        # اتصال وزن‌ها به خانواده تا bold واقعی استفاده شود
+        registerFontFamily(
+            "Vazirmatn",
+            normal="Vazirmatn",
+            bold="Vazirmatn-Bold",
+            italic="Vazirmatn",
+            boldItalic="Vazirmatn-Bold",
+        )
         return True
     except Exception:
         return False
 
 
 def register_qt_font() -> str:
-    """ثبت فونت وزیر برای رابط کاربری Qt.
+    """ثبت فونت وزیرمتن برای رابط کاربری Qt.
 
-    فونت به صورت «application font» اضافه می‌شود؛ یعنی بدون نصب
-    در ویندوز هم همه اجزای برنامه با وزیر نمایش داده می‌شوند.
-    خروجی: نام خانواده فونت ثبت‌شده (یا رشته خالی در صورت خطا).
+    هر سه وزن (معمولی/متوسط/ضخیم) به‌صورت «application font» اضافه
+    می‌شوند؛ یعنی بدون نصب فونت در ویندوز هم همهٔ اجزای برنامه با
+    وزیرمتن نمایش داده می‌شوند و متن‌های ضخیم از وزن Bold واقعی
+    استفاده می‌کنند (نه بولد مصنوعی کشیده‌شده).
+    خروجی: نام خانوادهٔ فونت ثبت‌شده (یا رشتهٔ خالی در صورت خطا).
     """
     from PyQt6.QtGui import QFontDatabase
 
-    path = font_path()
-    if not os.path.exists(path):
+    paths = font_paths()
+    if not paths:
         return ""
-    try:
-        font_id = QFontDatabase.addApplicationFont(path)
-        if font_id == -1:
-            return ""
-        families = QFontDatabase.applicationFontFamilies(font_id)
-        return families[0] if families else ""
-    except Exception:
-        return ""
+    family = ""
+    for path in paths:
+        try:
+            font_id = QFontDatabase.addApplicationFont(path)
+            if font_id == -1:
+                continue
+            families = QFontDatabase.applicationFontFamilies(font_id)
+            if families and not family:
+                family = families[0]
+        except Exception:
+            continue
+    return family
 
 
 def register_matplotlib_font() -> bool:
-    """ثبت فونت وزیر برای نمودارهای matplotlib (گزارش ماهانه)."""
+    """ثبت فونت وزیرمتن برای نمودارهای matplotlib (گزارش ماهانه)."""
     try:
         from matplotlib import font_manager, rcParams
     except ImportError:
         return False
 
-    path = font_path()
-    if not os.path.exists(path):
+    paths = font_paths()
+    if not paths:
         return False
     try:
-        font_manager.fontManager.addfont(path)
-        rcParams["font.family"] = "Vazir"
+        for path in paths:
+            font_manager.fontManager.addfont(path)
+        rcParams["font.family"] = "Vazirmatn"
         return True
     except Exception:
         return False

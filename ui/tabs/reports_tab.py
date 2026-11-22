@@ -99,7 +99,7 @@ class ReportsTab(QWidget):
     STYLESHEET = f"""
     ReportsTab {{
         background-color: {PAGE_BG};
-        font-family: 'Vazir', 'Arial';
+        font-family: 'Vazirmatn';
     }}
 
     QLabel {{
@@ -461,7 +461,7 @@ class ReportsTab(QWidget):
         dialog.setMinimumWidth(400)
         dialog.setStyleSheet(f"""
             QDialog {{ background-color: {PAGE_BG};
-                      font-family: 'Vazir', 'Arial'; }}
+                      font-family: 'Vazirmatn'; }}
             QLabel {{ color: {TEXT_DARK}; font-size: 13px; }}
         """)
 
@@ -549,7 +549,7 @@ class ReportsTab(QWidget):
         dialog.resize(980, 800 if chart_widget is not None else 680)
         dialog.setStyleSheet(f"""
             QDialog {{ background-color: {PAGE_BG};
-                      font-family: 'Vazir', 'Arial'; }}
+                      font-family: 'Vazirmatn'; }}
             QLabel {{ color: {TEXT_DARK}; }}
         """)
 

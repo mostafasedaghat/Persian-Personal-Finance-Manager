@@ -73,7 +73,7 @@ class DebtsTab(QWidget):
     STYLESHEET = f"""
     DebtsTab {{
         background-color: {PAGE_BG};
-        font-family: 'Vazir', 'Arial';
+        font-family: 'Vazirmatn';
     }}
 
     /* ---------- جداکننده قابل درگ ---------- */
@@ -1489,7 +1489,7 @@ class DebtsTab(QWidget):
             # این دیالوگ نامرئی می‌شوند.
             dialog.setStyleSheet(f"""
                 QDialog {{ background-color: {PAGE_BG};
-                          font-family: 'Vazir', 'Arial'; }}
+                          font-family: 'Vazirmatn'; }}
                 QLabel {{ color: {TEXT_DARK}; font-size: 13px; font-weight: bold; }}
                 QCheckBox {{ color: {TEXT_DARK}; font-size: 13px; }}
             """)
@@ -1903,7 +1903,7 @@ class DebtsTab(QWidget):
             # نکته: رنگ صریح لیبل‌ها برای جلوگیری از نامرئی شدن در تم تاریک ویندوز
             dialog.setStyleSheet(f"""
                 QDialog {{ background-color: {PAGE_BG};
-                          font-family: 'Vazir', 'Arial'; }}
+                          font-family: 'Vazirmatn'; }}
                 QLabel {{ color: {TEXT_DARK}; font-size: 13px; font-weight: bold; }}
                 QCheckBox {{ color: {TEXT_DARK}; font-size: 13px; }}
             """)
@@ -2292,7 +2292,7 @@ class DebtsTab(QWidget):
         # نکته: رنگ صریح لیبل‌ها برای جلوگیری از نامرئی شدن در تم تاریک ویندوز
         dialog.setStyleSheet(f"""
             QDialog {{ background-color: {PAGE_BG};
-                      font-family: 'Vazir', 'Arial'; }}
+                      font-family: 'Vazirmatn'; }}
             QLabel {{ color: {TEXT_DARK}; font-size: 13px; }}
         """)
         layout = QVBoxLayout(dialog)

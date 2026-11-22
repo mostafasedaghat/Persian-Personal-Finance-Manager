@@ -26,7 +26,7 @@ main.py — نرم‌افزار حسابداری شخصی (نسخه حرفه‌�
     ui/dialogs/change_password_dialog.py  پنجره تغییر رمز عبور
 
 منابع (فونت/استایل/آیکون):
-    assets/fonts/Vazir.ttf
+    assets/fonts/Vazirmatn-Regular.ttf
     assets/styles/styles.qss
     assets/icon.ico
 """
@@ -112,8 +112,8 @@ class FinanceApp(QMainWindow):
         elif not font_path():
             QMessageBox.warning(
                 self, "اخطار",
-                "فایل فونت Vazir.ttf یافت نشد؛ از فونت پیش‌فرض سیستم استفاده می‌شود.\n"
-                "مسیر مورد انتظار: assets/fonts/Vazir.ttf"
+                "فایل فونت وزیرمتن (Vazirmatn-Regular.ttf) یافت نشد؛ از فونت پیش‌فرض سیستم استفاده می‌شود.\n"
+                "مسیر مورد انتظار: assets/fonts/Vazirmatn-Regular.ttf"
             )
 
         # ثبت برای گزارش‌های PDF (reportlab)

@@ -76,7 +76,7 @@ class DashboardTab(QWidget):
     STYLESHEET = f"""
     DashboardTab {{
         background-color: {PAGE_BG};
-        font-family: 'Vazir', 'Arial';
+        font-family: 'Vazirmatn';
     }}
 
     /* ---------- هدر ---------- */

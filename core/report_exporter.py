@@ -475,7 +475,7 @@ def _write_excel(spec, raw_data, output_path):
         # --- سربرگ ---
         header_fill = PatternFill("solid", fgColor=HEADER_GREEN)
         for cell in ws[1]:
-            cell.font = Font(bold=True, color="FFFFFF", name="Vazir", size=11)
+            cell.font = Font(bold=True, color="FFFFFF", name="Vazirmatn", size=11)
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
@@ -499,7 +499,7 @@ def _write_excel(spec, raw_data, output_path):
             top_side = Side(style="medium", color=HEADER_GREEN)
             for c in range(1, n_cols + 1):
                 cell = ws.cell(row=r, column=c)
-                cell.font = Font(bold=True, name="Vazir", size=11)
+                cell.font = Font(bold=True, name="Vazirmatn", size=11)
                 cell.fill = PatternFill("solid", fgColor=TOTAL_FILL)
                 cell.border = Border(top=top_side)
                 if isinstance(cell.value, (int, float)):
@@ -515,7 +515,7 @@ def _write_pdf(spec, raw_data, output_path, date_range=None):
     _, df_text, has_total = _build_dataframes(spec, raw_data)
 
     _ensure_vazir()
-    font = "Vazir" if "Vazir" in getRegisteredFontNames() else "Helvetica"
+    font = "Vazirmatn" if "Vazirmatn" in getRegisteredFontNames() else "Helvetica"
 
     doc = SimpleDocTemplate(
         output_path, pagesize=A4,
@@ -665,7 +665,7 @@ def export_report(parent, raw_data, report_type, date_range=None):
     dialog.setMinimumWidth(320)
     dialog.setStyleSheet(f"""
         QDialog {{ background-color: {PAGE_BG};
-                  font-family: 'Vazir', 'Arial'; }}
+                  font-family: 'Vazirmatn'; }}
         QLabel {{ color: {TEXT_DARK}; font-size: 13px; }}
         QPushButton {{ text-align: center; }}
     """)

@@ -76,7 +76,7 @@ class TransactionsTab(QWidget):
     STYLESHEET = f"""
     TransactionsTab {{
         background-color: {PAGE_BG};
-        font-family: 'Vazir', 'Arial';
+        font-family: 'Vazirmatn';
     }}
 
     /* ---------- جداکننده قابل درگ ---------- */
@@ -1085,7 +1085,7 @@ class TransactionsTab(QWidget):
             # این دیالوگ نامرئی می‌شوند.
             dialog.setStyleSheet(f"""
                 QDialog {{ background-color: {PAGE_BG};
-                          font-family: 'Vazir', 'Arial'; }}
+                          font-family: 'Vazirmatn'; }}
                 QLabel {{ color: {TEXT_DARK}; font-size: 13px; font-weight: bold; }}
                 QCheckBox {{ color: {TEXT_DARK}; font-size: 13px; }}
             """)
@@ -1478,7 +1478,7 @@ class TransactionsTab(QWidget):
         dialog.resize(900, 620)
         dialog.setStyleSheet(f"""
             QDialog {{ background-color: {PAGE_BG};
-                      font-family: 'Vazir', 'Arial'; }}
+                      font-family: 'Vazirmatn'; }}
         """)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(16, 16, 16, 16)

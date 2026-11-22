@@ -399,7 +399,7 @@ class PersianCalendarWidget(QWidget):
                 color: white;
                 border: none;
                 border-radius: 7px;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 13px;
                 font-weight: bold;
                 min-width: 34px;
@@ -413,7 +413,7 @@ class PersianCalendarWidget(QWidget):
                 color: white;
                 border: none;
                 border-radius: 8px;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 15px;
                 font-weight: bold;
                 padding: 4px 14px;
@@ -423,7 +423,7 @@ class PersianCalendarWidget(QWidget):
             }
             QLabel#calTitleLbl {
                 color: white;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 15px;
                 font-weight: bold;
                 padding: 4px 10px;
@@ -433,7 +433,7 @@ class PersianCalendarWidget(QWidget):
             /* روزهای هفته */
             QLabel#calWeekday {
                 color: #64748b;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 11px;
                 font-weight: bold;
                 background: transparent;
@@ -445,7 +445,7 @@ class PersianCalendarWidget(QWidget):
                 color: #1e293b;
                 border: 1px solid #e5eaf1;
                 border-radius: 8px;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 12.5px;
                 min-width: 36px;
                 min-height: 30px;
@@ -461,7 +461,7 @@ class PersianCalendarWidget(QWidget):
                 color: white;
                 border: none;
                 border-radius: 8px;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 12.5px;
                 font-weight: bold;
                 min-width: 36px;
@@ -477,7 +477,7 @@ class PersianCalendarWidget(QWidget):
                 color: #1e293b;
                 border: 1px solid #e5eaf1;
                 border-radius: 9px;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 13px;
                 min-height: 38px;
             }
@@ -491,7 +491,7 @@ class PersianCalendarWidget(QWidget):
                 color: #166534;
                 border: 2px solid #16a34a;
                 border-radius: 9px;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 13px;
                 font-weight: bold;
                 min-height: 38px;
@@ -505,7 +505,7 @@ class PersianCalendarWidget(QWidget):
                 color: white;
                 border: none;
                 border-radius: 9px;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 13px;
                 font-weight: bold;
                 min-height: 38px;
@@ -520,7 +520,7 @@ class PersianCalendarWidget(QWidget):
                 color: #166534;
                 border: 1px solid #e2e8f0;
                 border-radius: 9px;
-                font-family: 'Vazir', 'Arial';
+                font-family: 'Vazirmatn';
                 font-size: 12.5px;
                 font-weight: bold;
                 padding: 7px;

@@ -56,7 +56,7 @@ class AccountsTab(QWidget):
     STYLESHEET = f"""
     AccountsTab {{
         background-color: {PAGE_BG};
-        font-family: 'Vazir', 'Arial';
+        font-family: 'Vazirmatn';
     }}
 
     /* ---------- هدر ---------- */
@@ -525,7 +525,7 @@ class AccountsTab(QWidget):
             dialog.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             dialog.setStyleSheet(f"""
                 QDialog {{ background-color: {PAGE_BG};
-                          font-family: 'Vazir', 'Arial'; }}
+                          font-family: 'Vazirmatn'; }}
                 QLabel {{ color: {TEXT_DARK}; font-size: 13px; }}
                 QLineEdit {{ background-color: white;
                             border: 1px solid #d3dce6; border-radius: 8px;

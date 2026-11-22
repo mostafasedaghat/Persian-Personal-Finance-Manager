@@ -57,7 +57,7 @@ class CategoriesTab(QWidget):
     STYLESHEET = f"""
     CategoriesTab {{
         background-color: {PAGE_BG};
-        font-family: 'Vazir', 'Arial';
+        font-family: 'Vazirmatn';
     }}
 
     /* ---------- جداکننده قابل درگ ---------- */
@@ -204,7 +204,7 @@ class CategoriesTab(QWidget):
     DIALOG_STYLE = f"""
         QDialog {{
             background-color: {PAGE_BG};
-            font-family: 'Vazir', 'Arial';
+            font-family: 'Vazirmatn';
         }}
         QLabel {{
             color: {TEXT_DARK};

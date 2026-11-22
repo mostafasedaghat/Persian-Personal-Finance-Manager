@@ -10,6 +10,79 @@ This is a personal finance management application built using PyQt6 for the grap
 
 ---
 
+## نگاهی به برنامه / Screenshots
+
+**فارسی**  
+تصاویر زیر با دادهٔ نمونهٔ الکی گرفته شده‌اند (بدون هیچ دادهٔ واقعی). برای دیدن هر تصویر در اندازهٔ کامل، روی آن کلیک کنید.
+
+**English**  
+The screenshots below were captured with fake sample data (no real data). Click any image to view it in full size.
+
+<table>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <a href="docs/screenshots/01-login.png">
+        <img src="docs/screenshots/01-login.png" alt="پنجرهٔ ورود / Login" width="380"></a><br>
+      <sub><b>پنجرهٔ ورود</b> · Login</sub>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <a href="docs/screenshots/02-dashboard.png">
+        <img src="docs/screenshots/02-dashboard.png" alt="داشبورد / Dashboard" width="440"></a><br>
+      <sub><b>داشبورد</b> · Dashboard</sub>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top" align="center">
+      <a href="docs/screenshots/03-accounts.png">
+        <img src="docs/screenshots/03-accounts.png" alt="حساب‌ها / Accounts" width="440"></a><br>
+      <sub><b>حساب‌ها</b> · Accounts</sub>
+    </td>
+    <td valign="top" align="center">
+      <a href="docs/screenshots/04-transactions.png">
+        <img src="docs/screenshots/04-transactions.png" alt="تراکنش‌ها / Transactions" width="440"></a><br>
+      <sub><b>تراکنش‌ها</b> · Transactions</sub>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top" align="center">
+      <a href="docs/screenshots/05-debts.png">
+        <img src="docs/screenshots/05-debts.png" alt="بدهی/طلب / Debts" width="440"></a><br>
+      <sub><b>بدهی/طلب</b> · Debts &amp; Credits</sub>
+    </td>
+    <td valign="top" align="center">
+      <a href="docs/screenshots/06-loans.png">
+        <img src="docs/screenshots/06-loans.png" alt="وام‌ها / Loans" width="440"></a><br>
+      <sub><b>وام‌ها و اقساط</b> · Loans &amp; Installments</sub>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top" align="center">
+      <a href="docs/screenshots/07-reports.png">
+        <img src="docs/screenshots/07-reports.png" alt="گزارش‌ها / Reports" width="440"></a><br>
+      <sub><b>مرکز گزارش‌ها</b> · Report Center</sub>
+    </td>
+    <td valign="top" align="center">
+      <a href="docs/screenshots/08-persons.png">
+        <img src="docs/screenshots/08-persons.png" alt="اشخاص / Persons" width="440"></a><br>
+      <sub><b>اشخاص</b> · Persons</sub>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top" align="center">
+      <a href="docs/screenshots/09-categories.png">
+        <img src="docs/screenshots/09-categories.png" alt="دسته‌بندی‌ها / Categories" width="440"></a><br>
+      <sub><b>دسته‌بندی‌ها</b> · Categories</sub>
+    </td>
+    <td valign="top" align="center">
+      <a href="docs/screenshots/10-settings.png">
+        <img src="docs/screenshots/10-settings.png" alt="تنظیمات / Settings" width="440"></a><br>
+      <sub><b>تنظیمات</b> · Settings</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## ویژگی‌ها / Features
 
 **فارسی**  
@@ -44,10 +117,11 @@ This is a personal finance management application built using PyQt6 for the grap
 ├── main.py                        # نقطه ورود برنامه (سبک و خوانا)
 ├── requirements.txt               # کتابخانه‌های مورد نیاز
 ├── finance_app.spec               # فایل ساخت نسخه ویندوز (PyInstaller)
+├── finance.db                     # دیتابیس (در این مخزن: دادهٔ نمونهٔ الکی)
 │
 ├── core/                          # منطق اصلی برنامه
 │   ├── database.py                # لایه دسترسی به داده (SQLite)
-│   ├── paths.py                   # مسیرهای منابع + ثبت فونت وزیر
+│   ├── paths.py                   # مسیرهای منابع + ثبت فونت وزیرمتن
 │   ├── utils.py                   # ابزارهای مشترک (تاریخ شمسی، فرمت عدد)
 │   └── report_exporter.py         # موتور خروجی اکسل/CSV/PDF
 │
@@ -68,8 +142,15 @@ This is a personal finance management application built using PyQt6 for the grap
 │       ├── categories_tab.py      # دسته‌بندی‌ها
 │       └── settings_tab.py        # تنظیمات
 │
+├── tools/                         # ابزارهای توسعه‌دهنده
+│   ├── generate_demo_data.py      # ساخت دیتابیس نمونه با دادهٔ الکی
+│   └── capture_screenshots.py     # اسکرین‌شات خودکار همهٔ صفحات (برای مستندات)
+│
+├── docs/
+│   └── screenshots/               # تصاویر برنامه برای README
+│
 └── assets/                        # منابع برنامه
-    ├── fonts/Vazir.ttf            # فونت فارسی
+    ├── fonts/                     # فونت فارسی وزیرمتن (معمولی/متوسط/ضخیم)
     ├── styles/styles.qss          # استایل سراسری
     ├── icon.ico                   # آیکون برنامه
     └── icon.png
@@ -131,6 +212,28 @@ To log in to the application for the first time, use the following credentials:
 - **Username**: `admin`  
 - **Password**: `password`  
 *It is recommended to change the password after logging in (from the Settings tab).*
+
+---
+
+## دادهٔ نمونه / Sample Data
+
+**فارسی**  
+فایل `finance.db` موجود در این مخزن حاوی **دادهٔ نمایشی کاملاً الکی** است (حساب‌ها، اشخاص، تراکنش‌ها، بدهی/طلب و وام‌های فرضی) تا بتوانید برنامه را بلافاصله اجرا و تست کنید. برای ساخت مجدد این داده از صفر:
+
+```bash
+python tools/generate_demo_data.py
+```
+
+هشدار: این اسکریپت فایل `finance.db` موجود را از نو می‌سازد؛ قبل از اجرا از دادهٔ خودتان بکاپ بگیرید.
+
+**English**  
+The `finance.db` file in this repository contains **entirely fake demo data** (accounts, persons, transactions, debts/credits, and loans) so you can run and test the app right away. To regenerate this data from scratch:
+
+```bash
+python tools/generate_demo_data.py
+```
+
+Warning: this script rebuilds the existing `finance.db`; back up your own data first.
 
 ---
 
